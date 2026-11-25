@@ -45,8 +45,8 @@ const siteStatus = computed(() => {
       <SettingRow title="Drag to scroll" hint="Hold the mouse and throw the page like a phone. Text selection is off while this is on.">
         <SwitchToggle v-model="settings.dragScroll" label="Drag to scroll" :disabled="!settings.enabled" />
       </SettingRow>
-      <SettingRow title="Smooth trackpads too" hint="Trackpads already glide on their own. Turn on to use this feel instead.">
-        <SwitchToggle v-model="settings.trackpad" label="Smooth trackpads too" :disabled="!settings.enabled" />
+      <SettingRow title="Smooth every wheel" hint="Includes high-res and free-spin mouse wheels and trackpads. Off: only classic notched wheels are smoothed.">
+        <SwitchToggle v-model="settings.trackpad" label="Smooth every wheel" :disabled="!settings.enabled" />
       </SettingRow>
       <RouterLink
         to="/tune"

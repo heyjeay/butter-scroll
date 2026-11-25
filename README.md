@@ -6,7 +6,7 @@ The krp_phone scroll feel for every website, as a Chrome extension:
 - **Rubber-band ends.** Past the top or bottom the content stretches a little, then springs back on the iOS curve. Fixed headers stay put.
 - **Drag to scroll (opt-in).** Hold the mouse and throw the page like a phone, with momentum on release.
 
-Sites that run their own smooth scrolling (Lenis, Locomotive, GSAP ScrollSmoother) keep it. So do maps and editors that handle the wheel themselves, and scroll-snap carousels. Trackpads are left alone by default. Ctrl+wheel still zooms.
+Sites that run their own smooth scrolling (Lenis, Locomotive, GSAP ScrollSmoother) keep it. So do maps and editors that handle the wheel themselves, and scroll-snap carousels. Every wheel is smoothed by default, including high-res and free-spin mouse wheels and trackpads; "Smooth every wheel" off limits it to classic notched wheels. Ctrl+wheel still zooms.
 
 ## Install
 

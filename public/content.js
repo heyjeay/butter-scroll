@@ -40,7 +40,7 @@
     stepScale: 1,      // multiplies how far one wheel notch goes
     bounce: true,      // rubber band at the ends
     dragScroll: false, // hold and drag the page like a phone
-    trackpad: false,   // also smooth trackpads / free-spin wheels (they are usually smooth already)
+    trackpad: true,    // also smooth fine-step input: high-res / free-spin mouse wheels and trackpads (off = only classic notched wheels)
     disabledSites: [],
     debug: false,      // log every decision to the page's console (F12)
   };
@@ -237,7 +237,8 @@
     if (raf) { cancelAnimationFrame(raf); raf = 0; }
   }
 
-  // a real mouse wheel moves in notches of 120; trackpads and free-spin wheels send small uneven steps
+  // a classic mouse wheel moves in notches of 120; trackpads and high-res / free-spin wheels send small uneven steps
+  // (only used when "Smooth every wheel" is off: plenty of mice report fine steps, so it cannot tell them apart)
   function looksLikeTrackpad(e) {
     if (e.deltaMode !== 0) return false;
     const wd = Math.abs(e.wheelDeltaY) || Math.abs(e.wheelDeltaX);
@@ -246,13 +247,13 @@
 
   let latch = null; // { ref: WeakRef(scroller), hit, axis, at }: weak, so a removed SPA view is not kept alive
   function onWheel(e) {
-    if (!alive()) { teardown(); return; }
+    if (!alive()) { log('this copy belongs to an extension that was reloaded or removed: standing down (refresh the tab)'); teardown(); return; }
     if (!active) { logWheel(!cfg.enabled ? 'skipped: Butter Scroll is off' : `skipped: switched off for ${host}`); return; }
     if (e.defaultPrevented) { logWheel('skipped: the page handled this wheel itself (preventDefault)', describe(e.target)); return; }
     if (e.ctrlKey || e.metaKey) { logWheel('skipped: ctrl+wheel zooms'); return; }
-    if (!e.isTrusted && !allowSynthetic) return;
+    if (!e.isTrusted && !allowSynthetic) { logWheel('skipped: a wheel event made by a script, not the mouse'); return; }
     if (!cfg.trackpad && looksLikeTrackpad(e)) {
-      logWheel(`skipped: looks like a trackpad or free-spin wheel (wheelDelta ${e.wheelDeltaY || e.wheelDeltaX}, not a multiple of 120). Turn on "Smooth trackpads too" to include it`);
+      logWheel(`skipped: fine-step input (trackpad, or a high-res / free-spin mouse wheel) (wheelDelta ${e.wheelDeltaY || e.wheelDeltaX}, not a multiple of 120). Turn on "Smooth every wheel" in the popup to include it`);
       return;
     }
     if (pageScrollsItself()) { logWheel('skipped: this site runs its own smooth scrolling (Lenis / Locomotive / ScrollSmoother)'); return; }
@@ -261,7 +262,7 @@
     if (e.shiftKey && dy && !dx) { dx = dy; dy = 0; } // shift+wheel scrolls sideways
     const axis = Math.abs(dy) >= Math.abs(dx) ? 'y' : 'x';
     let delta = axis === 'y' ? dy : dx;
-    if (!delta) return;
+    if (!delta) { logWheel('skipped: a wheel event that moves nothing (delta 0)'); return; }
     const path = e.composedPath();
     const now = performance.now();
 
@@ -305,7 +306,12 @@
   // and never came back out; after two in a row this page is handled on the way in instead.
   let captureMode = false;
   let inFlight = null, vanished = 0;
+  let lastArrivalLog = 0;
   on(window, 'wheel', (e) => {
+    if (logOn && performance.now() - lastArrivalLog > 2000) { // proof the wheel reaches the engine at all
+      lastArrivalLog = performance.now();
+      log('wheel received:', { deltaY: e.deltaY, deltaMode: e.deltaMode, wheelDeltaY: e.wheelDeltaY, trusted: e.isTrusted, over: describe(e.composedPath()[0]) });
+    }
     if (captureMode) { onWheel(e); return; }
     if (inFlight) {
       vanished++;
@@ -477,7 +483,7 @@
     if (area === 'sync' && alive()) store.get(DEFAULTS).then(applySettings, () => {});
   }
   function teardown() {
-    log('teardown');
+    log('stopped: a newer copy took over (or the extension was reloaded)');
     stopEverything();
     active = false;
     life.abort(); // drops every listener added through on()
