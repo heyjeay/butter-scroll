@@ -9,7 +9,13 @@
   const debug = false;
   const log = (...a) => { if (debug) console.log('[butter-scroll]', ...a); };
 
-  if (window.__butterScroll) return;
+  // One engine per page. A newer copy (the extension was reloaded or updated, or the background worker
+  // injected it into an already open tab) asks the old one to stand down instead of being turned away:
+  // the old copy's chrome.* is dead after a reload, so it could no longer hear settings change.
+  window.dispatchEvent(new CustomEvent('butter-scroll:takeover'));
+  const life = new AbortController();
+  const on = (target, type, fn, opts) =>
+    target.addEventListener(type, fn, { ...(typeof opts === 'boolean' ? { capture: opts } : opts), signal: life.signal });
   window.__butterScroll = true;
 
   const DEFAULTS = {
@@ -22,7 +28,7 @@
     disabledSites: [],
   };
   const SPRING = '.45s cubic-bezier(.25,1,.5,1)';
-  const LATCH_MS = 300;        // wheel notches this close together stay on the scroller they started on
+  const LATCH_MS = 300;        // a notch this soon after the last stays on a scroller that is still on its way
   const DRAG_START = 7;        // px the mouse travels before a press becomes a drag
   const DRAG_SKIP = 'input, textarea, select, button, a, label, summary, video, audio, canvas, iframe, embed, object, img, svg, [contenteditable=""], [contenteditable="true"], [draggable="true"], [role="slider"], [role="scrollbar"]';
 
@@ -94,7 +100,9 @@
     if (body && document.contains(body) && rootScrolls(axis)) {
       const r = root();
       if (canMove(r, axis, dir) || !stuck) {
-        const ob = getComputedStyle(document.documentElement)[axis === 'y' ? 'overscrollBehaviorY' : 'overscrollBehaviorX'];
+        const hcs = getComputedStyle(html);
+        if (hcs.scrollSnapType !== 'none' || (bodyIsViewport && getComputedStyle(body).scrollSnapType !== 'none')) return null; // a snapping page
+        const ob = hcs[axis === 'y' ? 'overscrollBehaviorY' : 'overscrollBehaviorX'];
         return { el: r, noBounce: ob === 'none' };
       }
     }
@@ -162,11 +170,14 @@
     const ease = Math.max(16, cfg.smoothness);
     for (const g of glides.values()) {
       if (!g.el.isConnected) { glides.delete(g.el); continue; }
-      // something else moved it (scrollbar drag, keys, find in page, scroll anchoring): let that win
-      if (Math.abs(posOf(g.el, g.axis) - g.set) > 2) { log('glide interrupted'); glides.delete(g.el); continue; }
+      // the page shifted under the glide (scroll anchoring as a header collapses or posts load above,
+      // a site nudging its own scroll): ride along instead of fighting it or giving up.
+      // The user grabbing the scrollbar or pressing keys stops the glide on its own (pointerdown / keydown)
+      const drift = posOf(g.el, g.axis) - g.set;
+      if (Math.abs(drift) > 1) { g.pos += drift; g.target += drift; log('glide drift', drift); }
       const dt = g.last === null ? 16 : Math.max(0, Math.min(40, now - g.last));
       g.last = now;
-      g.target = Math.min(g.target, maxOf(g.el, g.axis)); // the content may have shrunk
+      g.target = Math.max(0, Math.min(g.target, maxOf(g.el, g.axis))); // the content may have shrunk
       g.pos += (g.target - g.pos) * (1 - Math.exp(-dt / ease)); // pos is kept here: scrollTop rounds
       const done = Math.abs(g.target - g.pos) < 0.5;
       write(g.el, g.axis, done ? g.target : g.pos);
@@ -200,6 +211,7 @@
 
   let latch = null; // { ref: WeakRef(scroller), hit, axis, at }: weak, so a removed SPA view is not kept alive
   function onWheel(e) {
+    if (!alive()) { teardown(); return; }
     if (!active || e.defaultPrevented || e.ctrlKey || e.metaKey) return; // ctrl+wheel is zoom
     if (!e.isTrusted && !allowSynthetic) return;
     if (!cfg.trackpad && looksLikeTrackpad(e)) return;
@@ -213,10 +225,16 @@
     const path = e.composedPath();
     const now = performance.now();
 
+    // Stay on the scroller the last notch went to while it still has somewhere to go (so a box sliding
+    // under the cursor mid-glide does not steal the scroll). Once its glide is already headed for the end,
+    // look again so the rest chains outward like Chrome does: holding on trapped the wheel on any element
+    // that could only scroll a few pixels (overflow-x: hidden quietly makes overflow-y auto).
     let hit = null;
+    const dir = Math.sign(delta);
     const latched = latch && latch.axis === axis && now - latch.at < LATCH_MS && latch.ref.deref();
-    if (latched && latched.isConnected && path.includes(latched)) hit = { el: latched, noBounce: latch.noBounce };
-    else hit = findScroller(path, axis, Math.sign(delta));
+    if (latched && latched.isConnected && path.includes(latched) && canMove(latched, axis, dir)) {
+      hit = { el: latched, noBounce: latch.noBounce };
+    } else hit = findScroller(path, axis, dir);
     if (!hit) { latch = null; return; }
     latch = { ref: new WeakRef(hit.el), noBounce: hit.noBounce, axis, at: now };
 
@@ -240,7 +258,7 @@
     if (stretched.has(el)) springBack(el);
     glideBy(el, axis, delta);
   }
-  window.addEventListener('wheel', onWheel, { passive: false }); // bubbling: a page that handles the wheel itself goes first
+  on(window, 'wheel', onWheel, { passive: false }); // bubbling: a page that handles the wheel itself goes first
 
   // ---------------------------------------------------------------- drag to scroll + momentum (opt-in)
   let fling = null;
@@ -296,7 +314,7 @@
     press = null;
   }
 
-  window.addEventListener('pointerdown', (e) => {
+  on(window, 'pointerdown', (e) => {
     stopGlides(); // a click on a scrollbar (or anything) mid-glide: stop where it is
     stopFling();
     if (!active || !cfg.dragScroll || e.pointerType !== 'mouse' || e.button !== 0) return;
@@ -307,7 +325,7 @@
     press = { id: e.pointerId, x: e.clientX, y: e.clientY, path: e.composedPath(), dragging: false, samples: [[performance.now(), e.clientX, e.clientY]] };
   }, true);
 
-  window.addEventListener('pointermove', (e) => {
+  on(window, 'pointermove', (e) => {
     if (!press || e.pointerId !== press.id) return;
     const dx = e.clientX - press.x, dy = e.clientY - press.y;
     press.samples.push([performance.now(), e.clientX, e.clientY]);
@@ -357,19 +375,19 @@
     const v = velocity(p);
     if (Math.abs(v) > 0.1) startFling(p.el, p.axis, -v);
   }
-  window.addEventListener('pointerup', release, true);
-  window.addEventListener('pointercancel', release, true);
-  window.addEventListener('click', (e) => {
+  on(window, 'pointerup', release, true);
+  on(window, 'pointercancel', release, true);
+  on(window, 'click', (e) => {
     if (Date.now() < swallowClickUntil) { swallowClickUntil = 0; e.stopPropagation(); e.preventDefault(); }
   }, true);
-  window.addEventListener('dragstart', (e) => { // a native drag (an image, a link) got there first: it wins
+  on(window, 'dragstart', (e) => { // a native drag (an image, a link) got there first: it wins
     if (!press) return;
     if (press.dragging) e.preventDefault(); else press = null;
   }, true);
 
   // keys and the scrollbar move the page themselves; a glide in flight would fight them
   const SCROLL_KEYS = new Set(['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'PageUp', 'PageDown', 'Home', 'End', ' ']);
-  window.addEventListener('keydown', (e) => { if (glides.size && SCROLL_KEYS.has(e.key)) stopGlides(); }, true);
+  on(window, 'keydown', (e) => { if (glides.size && SCROLL_KEYS.has(e.key)) stopGlides(); }, true);
 
   function stopEverything() {
     stopGlides();
@@ -378,15 +396,28 @@
     for (const el of [...stretched.keys()]) restore(el);
     latch = null;
   }
-  window.addEventListener('pagehide', stopEverything);
-  window.addEventListener('blur', endPress); // the button can come up in another window: no stuck drag
+  on(window, 'pagehide', stopEverything);
+  on(window, 'blur', endPress); // the button can come up in another window: no stuck drag
 
   // last, so everything applySettings touches exists
   const store = typeof chrome !== 'undefined' && chrome.storage && chrome.storage.sync;
+  // after the extension is reloaded or removed, this copy's chrome.runtime goes dead: it then steps aside
+  function alive() {
+    try { return !store || !!chrome.runtime.id; } catch (err) { return false; }
+  }
+  function onStorage(changes, area) {
+    if (area === 'sync' && alive()) store.get(DEFAULTS).then(applySettings, () => {});
+  }
+  function teardown() {
+    log('teardown');
+    stopEverything();
+    active = false;
+    life.abort(); // drops every listener added through on()
+    try { if (store) chrome.storage.onChanged.removeListener(onStorage); } catch (err) { /* context gone */ }
+  }
+  on(window, 'butter-scroll:takeover', teardown);
   if (store) {
     store.get(DEFAULTS).then(applySettings, () => applySettings());
-    chrome.storage.onChanged.addListener((changes, area) => {
-      if (area === 'sync') store.get(DEFAULTS).then(applySettings, () => {});
-    });
+    chrome.storage.onChanged.addListener(onStorage);
   } else applySettings();
 })();

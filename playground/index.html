@@ -54,6 +54,7 @@
       const listeners = [];
       const read = () => { try { return JSON.parse(localStorage.getItem(KEY) || '{}'); } catch (e) { return {}; } };
       window.chrome = window.chrome || {};
+      chrome.runtime = { id: 'playground' }; // the engine stands down when its extension's runtime is gone
       chrome.storage = {
         sync: {
           get: async (defaults) => ({ ...defaults, ...read() }),

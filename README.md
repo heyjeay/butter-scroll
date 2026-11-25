@@ -15,7 +15,7 @@ npm install
 npm run build
 ```
 
-Then in Chrome: `chrome://extensions` → turn on **Developer mode** → **Load unpacked** → pick the **`dist`** folder. Only `dist` has the built popup; the manifest source is in `extension/manifest.json`, and its version comes from `package.json`. After a rebuild, press the reload icon on the extension's card.
+Then in Chrome: `chrome://extensions` → turn on **Developer mode** → **Load unpacked** → pick the **`dist`** folder. Only `dist` has the built popup; the manifest source is in `extension/manifest.json`, and its version comes from `package.json`. After a rebuild, press the reload icon on the extension's card. Tabs that are already open get the new engine at once: a small background worker (`public/background.js`) injects it on install, update or reload. That's what the `scripting` and host permissions are for.
 
 ## Develop
 
