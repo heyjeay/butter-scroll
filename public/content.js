@@ -40,6 +40,7 @@
     stepScale: 1,      // multiplies how far one wheel notch goes
     bounce: true,      // rubber band at the ends
     dragScroll: false, // hold and drag the page like a phone
+    swipeTabs: false,  // with dragScroll: flick sideways where nothing scrolls sideways to change tab
     trackpad: true,    // also smooth fine-step input: high-res / free-spin mouse wheels and trackpads (off = only classic notched wheels)
     disabledSites: [],
     debug: false,      // log every decision to the page's console (F12)
@@ -383,12 +384,58 @@
   function endPress() {
     if (!press) return;
     if (press.dragging) document.documentElement.classList.remove('butter-dragging');
+    if (press.swipe) hideSwipe();
     press = null;
+  }
+
+  // ---------------------------------------------------------------- swipe to switch tabs (opt-in, with drag to scroll)
+  const SWIPE_DIST = 140; // px of sideways drag that switches the tab on release
+  // carousels and sliders that take sideways drags themselves say so with touch-action (pan-y / none): theirs
+  function ownsSideways(path) {
+    return path.some((n) => {
+      if (!(n instanceof Element)) return false;
+      const ta = getComputedStyle(n).touchAction;
+      return ta !== 'auto' && ta !== 'manipulation' && !ta.includes('pan-x');
+    });
+  }
+  function switchTab(dir) {
+    log('switching tab', dir > 0 ? 'next' : 'previous');
+    try { chrome.runtime.sendMessage({ type: 'butter:switch-tab', dir }).catch(() => {}); } catch (err) { /* extension reloaded */ }
+  }
+  // a pill at the edge the next tab comes from: follows the drag, fills in once letting go will switch
+  let swipeHost = null, swipePill = null;
+  function showSwipe(dx) {
+    if (!swipeHost || !swipeHost.isConnected) {
+      swipeHost = document.createElement('div');
+      swipeHost.style.cssText = 'position:fixed;inset:0;pointer-events:none;z-index:2147483647;';
+      const shadow = swipeHost.attachShadow({ mode: 'closed' }); // the site's CSS cannot reach it
+      shadow.innerHTML = `<style>
+        .pill { position: fixed; top: 50%; padding: 10px 16px; border-radius: 999px; font: 600 13px/1 "Segoe UI", system-ui, sans-serif;
+          color: #f2ede1; background: rgb(26 24 19 / .82); box-shadow: 0 4px 18px rgb(0 0 0 / .25); white-space: nowrap;
+          transition: background .15s, color .15s; }
+        .pill.ready { background: #f6cf57; color: #3b2d05; }
+      </style><div class="pill"></div>`;
+      swipePill = shadow.querySelector('.pill');
+      document.documentElement.appendChild(swipeHost);
+    }
+    const p = Math.min(1, Math.abs(dx) / SWIPE_DIST);
+    const next = dx < 0;
+    swipePill.textContent = next ? 'Next tab →' : '← Previous tab';
+    swipePill.classList.toggle('ready', p >= 1);
+    swipePill.style.left = next ? 'auto' : '12px';
+    swipePill.style.right = next ? '12px' : 'auto';
+    swipePill.style.opacity = String(0.25 + p * 0.75);
+    swipePill.style.transform = `translate(${(next ? 1 : -1) * (1 - p) * 40}px, -50%)`;
+  }
+  function hideSwipe() {
+    if (swipeHost) swipeHost.remove();
+    swipeHost = swipePill = null;
   }
 
   on(window, 'pointerdown', (e) => {
     stopGlides(); // a click on a scrollbar (or anything) mid-glide: stop where it is
     stopFling();
+    swallowClickUntil = 0; // a new press: whatever click comes now is a real one
     if (!active || !cfg.dragScroll || e.pointerType !== 'mouse' || e.button !== 0) return;
     const t = e.composedPath()[0];
     const path = e.composedPath();
@@ -407,21 +454,31 @@
     if (!press.dragging) {
       if (Math.abs(dx) < DRAG_START && Math.abs(dy) < DRAG_START) return;
       const axis = Math.abs(dy) >= Math.abs(dx) ? 'y' : 'x';
-      const hit = findScroller(press.path, axis, axis === 'y' ? -Math.sign(dy) : -Math.sign(dx));
-      if (!hit) { press = null; return; }
+      const dir = axis === 'y' ? -Math.sign(dy) : -Math.sign(dx);
+      let hit = findScroller(press.path, axis, dir);
+      // the page itself only keeps a sideways drag when it has real room to go that way: plenty of sites
+      // overflow sideways by a few px by accident, and a page already at its edge would only bounce
+      if (axis === 'x' && cfg.swipeTabs && hit && hit.el === root() && (!canMove(hit.el, 'x', dir) || maxOf(hit.el, 'x') < 40)) hit = null;
+      // sideways where nothing scrolls sideways: a swipe to the next / previous tab (when switched on)
+      const swipe = !hit && axis === 'x' && cfg.swipeTabs && !ownsSideways(press.path);
+      if (!hit && !swipe) { press = null; return; }
       press.dragging = true;
       press.axis = axis;
-      press.el = hit.el;
-      press.noBounce = hit.noBounce;
-      press.from = posOf(hit.el, axis) + (axis === 'y' ? dy : dx); // carry on from here, no jump
+      press.swipe = swipe;
+      if (!swipe) {
+        press.el = hit.el;
+        press.noBounce = hit.noBounce;
+        press.from = posOf(hit.el, axis) + (axis === 'y' ? dy : dx); // carry on from here, no jump
+      }
       press.path = null;
       ensureDragStyle();
       document.documentElement.classList.add('butter-dragging');
       const sel = window.getSelection && window.getSelection();
       if (sel) sel.removeAllRanges();
       try { document.documentElement.setPointerCapture(press.id); } catch (err) { /* already gone */ }
-      log('drag', axis);
+      log(swipe ? 'swipe for a tab' : 'drag', axis);
     }
+    if (press.swipe) { showSwipe(dx); return; }
     const el = press.el, axis = press.axis;
     const max = maxOf(el, axis);
     const want = press.from - (axis === 'y' ? dy : dx);
@@ -445,6 +502,14 @@
     endPress();
     if (!p.dragging) return;
     swallowClickUntil = Date.now() + 350; // the click that follows a drag is not a tap
+    if (p.swipe) {
+      hideSwipe();
+      const dx = e.clientX - p.x, v = velocity(p);
+      // far enough, or a quick flick the same way: flick left = next tab, flick right = previous (like Safari's tab bar)
+      const go = Math.abs(dx) >= SWIPE_DIST || (Math.abs(dx) >= 50 && Math.abs(v) > 0.6 && Math.sign(v) === Math.sign(dx));
+      if (go) switchTab(dx < 0 ? 1 : -1);
+      return;
+    }
     if (stretched.has(p.el)) { springBack(p.el); return; }
     const v = velocity(p);
     if (Math.abs(v) > 0.1) startFling(p.el, p.axis, -v);

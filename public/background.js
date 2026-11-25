@@ -4,6 +4,20 @@
 const debug = false;
 const log = (...a) => { if (debug) console.log('[butter-scroll bg]', ...a); };
 
+// Swipe to switch tabs: content.js asks, this picks the neighbour in the same window (wrapping like Ctrl+Tab)
+chrome.runtime.onMessage.addListener((msg, sender) => {
+  if (!msg || msg.type !== 'butter:switch-tab' || !sender.tab) return;
+  const from = sender.tab;
+  chrome.tabs.query({ windowId: from.windowId }).then((tabs) => {
+    tabs.sort((a, b) => a.index - b.index);
+    const i = tabs.findIndex((t) => t.id === from.id);
+    if (i < 0 || tabs.length < 2) return;
+    const to = tabs[(i + (msg.dir > 0 ? 1 : -1) + tabs.length) % tabs.length];
+    log('switch', from.id, '->', to.id);
+    return chrome.tabs.update(to.id, { active: true });
+  }).catch((err) => log('switch failed', err && err.message));
+});
+
 chrome.runtime.onInstalled.addListener(async () => {
   const tabs = await chrome.tabs.query({ url: ['http://*/*', 'https://*/*'] });
   for (const tab of tabs) {
