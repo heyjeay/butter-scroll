@@ -462,11 +462,40 @@
     const shadow = host.attachShadow({ mode: 'closed' });
     shadow.innerHTML = `<style>
       canvas { position: fixed; inset: 0; width: 100vw; height: 100vh; }
-      .pill { position: fixed; top: 50%; padding: 10px 16px; border-radius: 999px; font: 600 13px/1 "Segoe UI", system-ui, sans-serif;
-        color: #f2ede1; background: rgb(26 24 19 / .82); box-shadow: 0 4px 18px rgb(0 0 0 / .25); white-space: nowrap;
-        transition: background .15s, color .15s, opacity .3s; }
-      .pill.ready { background: ${BUTTER}; color: ${BUTTER_INK}; }
-    </style><canvas></canvas><div class="pill"></div>`;
+      /* the pill is a pat of butter: creamy top, deeper bottom, a slightly uneven soft shape, a shine along
+         the top, and drips under it that lengthen (--p) as the swipe nears switching; it glints once ready */
+      .pill { position: fixed; top: 50%; padding: 10px 17px 11px; white-space: nowrap;
+        border-radius: 10px 13px 11px 9px / 9px 11px 13px 10px;
+        font: 700 13px/1 "Segoe UI", system-ui, sans-serif; color: #4a3506; text-shadow: 0 1px 0 rgb(255 248 214 / .6);
+        background: linear-gradient(180deg, #fff6c9 0%, #fbe27f 30%, ${BUTTER} 68%, #e9b93a 100%);
+        border: 1px solid #d9a521;
+        box-shadow: inset 0 1.5px 0 rgb(255 255 255 / .75), inset 0 -3px 2px rgb(201 140 14 / .35),
+          0 6px 16px rgb(0 0 0 / .28), 0 1px 2px rgb(0 0 0 / .2);
+        transition: opacity .3s, filter .2s, scale .3s cubic-bezier(.3, 1.6, .5, 1); }
+      .pill.ready { filter: brightness(1.04) saturate(1.12); scale: 1.05; }
+      .shine { position: absolute; top: 3px; left: 12%; width: 46%; height: 4px; border-radius: 999px;
+        background: linear-gradient(90deg, rgb(255 255 255 / 0), rgb(255 255 255 / .85) 30%, rgb(255 255 255 / .15)); }
+      .glint { position: absolute; inset: 0; border-radius: inherit; overflow: hidden; }
+      .glint::before { content: ''; position: absolute; top: -20%; bottom: -20%; width: 30%; left: 0;
+        background: linear-gradient(90deg, rgb(255 255 255 / 0), rgb(255 255 255 / .7), rgb(255 255 255 / 0));
+        transform: translateX(-150%) skewX(-20deg); }
+      .pill.ready .glint::before { animation: glint .7s ease-out; }
+      @keyframes glint { to { transform: translateX(420%) skewX(-20deg); } }
+      /* a drip: flares out of the butter (concave fillets), narrows to a neck, swells into a drop */
+      .drip { position: absolute; top: calc(100% - 3px); width: var(--w); margin-left: calc(var(--w) / -2);
+        height: calc(4px + var(--p, 0) * var(--l) * 1px); border-radius: 0 0 50% 50% / 0 0 6px 6px;
+        background: linear-gradient(90deg, #dda52a, #f0c447 45%, #d89f25); }
+      .drip::before { content: ''; position: absolute; top: 0; left: -5px; right: -5px; height: 6px;
+        background: radial-gradient(circle at 0 100%, transparent 5px, #e7b538 5.5px) left / 50% 100% no-repeat,
+          radial-gradient(circle at 100% 100%, transparent 5px, #e7b538 5.5px) right / 50% 100% no-repeat; }
+      .drip::after { content: ''; position: absolute; left: 50%; bottom: -5px; width: var(--b); height: calc(var(--b) * 1.12);
+        transform: translateX(-50%); border-radius: 50% 50% 50% 50% / 42% 42% 58% 58%;
+        background: radial-gradient(circle at 34% 30%, #fff0b0 0 12%, #f4cb52 38%, #d89f25 88%);
+        box-shadow: 0 2px 3px rgb(0 0 0 / .25); }
+      .d1 { left: 22%; --l: 9; --w: 4px; --b: 8px; }
+      .d2 { left: 55%; --l: 17; --w: 5px; --b: 10px; }
+      .d3 { left: 81%; --l: 6; --w: 3.5px; --b: 7px; }
+    </style><canvas></canvas><div class="pill"><span class="label"></span><i class="shine"></i><i class="glint"></i><i class="drip d1"></i><i class="drip d2"></i><i class="drip d3"></i></div>`;
     document.documentElement.appendChild(host);
     const canvas = shadow.querySelector('canvas');
     const dpr = window.devicePixelRatio || 1;
@@ -476,7 +505,7 @@
     ctx.scale(dpr, dpr);
     const trail = cfg.swipeTrail !== false; // the popup's "Butter trail" switch (off: just the pill)
     const t = performance.now();
-    fx = { host, ctx, pill: shadow.querySelector('.pill'), pts: [{ x, y, t }], head: { x, y }, dx: 0, drips: [],
+    fx = { host, ctx, pill: shadow.querySelector('.pill'), label: shadow.querySelector('.label'), pts: [{ x, y, t }], head: { x, y }, dx: 0, drips: [],
       raf: 0, last: null, nextDrip: 0, ready: false, fadeAt: 0, switched: false, trail, box: null,
       shown: { right: null, ready: null } }; // what the pill shows now, so it is only rewritten on a change
     fx.raf = requestAnimationFrame(fxFrame);
@@ -508,7 +537,7 @@
     f.ready = ready;
     if (f.shown.right !== right) {
       f.shown.right = right;
-      f.pill.textContent = right ? 'Next tab →' : '← Previous tab';
+      f.label.textContent = right ? 'Next tab →' : '← Previous tab';
       f.pill.style.left = right ? 'auto' : '12px';
       f.pill.style.right = right ? '12px' : 'auto';
     }
@@ -517,6 +546,8 @@
     if (f.shown.opacity !== opacity) { f.shown.opacity = opacity; f.pill.style.opacity = String(opacity); }
     const shift = f.fadeAt ? 0 : Math.round((right ? 1 : -1) * (1 - p) * 40);
     if (f.shown.shift !== shift) { f.shown.shift = shift; f.pill.style.transform = `translate(${shift}px, -50%)`; }
+    const melt = Math.round(p * 25) / 25; // how far the drips have run, in steps so it is not rewritten every frame
+    if (f.shown.melt !== melt) { f.shown.melt = melt; f.pill.style.setProperty('--p', String(melt)); }
   }
   function fxClose() {
     if (!fx) return;
