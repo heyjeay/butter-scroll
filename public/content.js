@@ -462,26 +462,13 @@
     const shadow = host.attachShadow({ mode: 'closed' });
     shadow.innerHTML = `<style>
       canvas { position: fixed; inset: 0; width: 100vw; height: 100vh; }
-      /* the pill: dark, then flat butter once letting go will switch; drips in the same flat colour run off
-         the bottom and lengthen (--p) as the swipe nears the switch point. The colours are opaque so the
-         drips join the pill without a seam (the pill's opacity fades the whole thing as one) */
-      .pill { --c: #1f1c16; position: fixed; top: 50%; padding: 10px 16px; border-radius: 999px; white-space: nowrap;
-        font: 600 13px/1 "Segoe UI", system-ui, sans-serif; color: #f2ede1; background: var(--c);
-        filter: drop-shadow(0 4px 9px rgb(0 0 0 / .25)); /* one shadow for the pill and its drips */
-        transition: background .15s, color .15s, opacity .3s; }
-      .pill.ready { --c: ${BUTTER}; color: ${BUTTER_INK}; }
-      /* a drip: flares out of the pill (concave fillets), narrows to a neck, ends in a round drop */
-      .drip { position: absolute; top: calc(100% - 2px); width: var(--w); margin-left: calc(var(--w) / -2);
-        height: calc(3px + var(--p, 0) * var(--l) * 1px); background: var(--c); transition: background .15s; }
-      .drip::before { content: ''; position: absolute; top: 0; left: -5px; right: -5px; height: 6px;
-        background: radial-gradient(circle at 0 100%, transparent 5px, var(--c) 5.5px) left / 50% 100% no-repeat,
-          radial-gradient(circle at 100% 100%, transparent 5px, var(--c) 5.5px) right / 50% 100% no-repeat; }
-      .drip::after { content: ''; position: absolute; left: 50%; bottom: calc(var(--b) / -2); width: var(--b); height: var(--b);
-        transform: translateX(-50%); border-radius: 50%; background: var(--c); transition: background .15s; }
-      .d1 { left: 26%; --l: 9; --w: 4px; --b: 8px; }
-      .d2 { left: 56%; --l: 17; --w: 5px; --b: 10px; }
-      .d3 { left: 80%; --l: 6; --w: 3.5px; --b: 7px; }
-    </style><canvas></canvas><div class="pill"><span class="label"></span><i class="drip d1"></i><i class="drip d2"></i><i class="drip d3"></i></div>`;
+      /* the pill: dark, then flat butter once letting go will switch. Its drips are drawn on the canvas
+         underneath (fxFrame), so they form, swell, break off and fall like the trail's */
+      .pill { position: fixed; top: 50%; padding: 10px 16px; border-radius: 999px; white-space: nowrap;
+        font: 600 13px/1 "Segoe UI", system-ui, sans-serif; color: #f2ede1; background: #1f1c16;
+        box-shadow: 0 4px 18px rgb(0 0 0 / .25); transition: background .15s, color .15s, opacity .3s; }
+      .pill.ready { background: ${BUTTER}; color: ${BUTTER_INK}; }
+    </style><canvas></canvas><div class="pill"><span class="label"></span></div>`;
     document.documentElement.appendChild(host);
     const canvas = shadow.querySelector('canvas');
     const dpr = window.devicePixelRatio || 1;
@@ -492,7 +479,7 @@
     const trail = cfg.swipeTrail !== false; // the popup's "Butter trail" switch (off: just the pill)
     const t = performance.now();
     fx = { host, ctx, pill: shadow.querySelector('.pill'), label: shadow.querySelector('.label'), pts: [{ x, y, t }], head: { x, y }, dx: 0, drips: [],
-      raf: 0, last: null, nextDrip: 0, ready: false, fadeAt: 0, switched: false, trail, box: null,
+      raf: 0, last: null, nextDrip: 0, nextPillDrip: 0, pillW: 0, pillH: 0, ready: false, fadeAt: 0, switched: false, trail, box: null,
       shown: { right: null, ready: null } }; // what the pill shows now, so it is only rewritten on a change
     fx.raf = requestAnimationFrame(fxFrame);
   }
@@ -526,14 +513,14 @@
       f.label.textContent = right ? 'Next tab →' : '← Previous tab';
       f.pill.style.left = right ? 'auto' : '12px';
       f.pill.style.right = right ? '12px' : 'auto';
+      f.pillW = f.pill.offsetWidth; // measured only when the text changes: where its drips can form
+      f.pillH = f.pill.offsetHeight;
     }
     if (f.shown.ready !== ready) { f.shown.ready = ready; f.pill.classList.toggle('ready', ready); }
     const opacity = f.fadeAt ? (f.switched ? 1 : 0) : 0.25 + p * 0.75;
     if (f.shown.opacity !== opacity) { f.shown.opacity = opacity; f.pill.style.opacity = String(opacity); }
     const shift = f.fadeAt ? 0 : Math.round((right ? 1 : -1) * (1 - p) * 40);
     if (f.shown.shift !== shift) { f.shown.shift = shift; f.pill.style.transform = `translate(${shift}px, -50%)`; }
-    const melt = Math.round(p * 25) / 25; // how far the drips have run, in steps so it is not rewritten every frame
-    if (f.shown.melt !== melt) { f.shown.melt = melt; f.pill.style.setProperty('--p', String(melt)); }
   }
   function fxClose() {
     if (!fx) return;
@@ -559,6 +546,21 @@
     };
     // the tail is the last TAIL_MS of movement: it follows the cursor and pulls back into the pat when it stops
     while (f.pts.length > 1 && now - f.pts[0].t > TAIL_MS) f.pts.shift();
+
+    // the pill melts once it turns butter (letting go will switch): drops keep forming at random spots
+    // along its bottom edge, just under it so the pill hides where they join. Back below the switch
+    // point, or once let go, the ones still hanging break off and fall
+    if (f.ready && !f.fadeAt && f.pillW) {
+      if (now >= f.nextPillDrip && f.drips.length < 60) {
+        const vw = document.documentElement.clientWidth, vh = document.documentElement.clientHeight;
+        const left = f.shown.right ? vw - 12 - f.pillW : 12;
+        f.drips.push({ x: left + 16 + Math.random() * (f.pillW - 32), y: vh / 2 + f.pillH / 2 - 3, len: 0,
+          max: 6 + Math.random() * 16, r: 3 + Math.random() * 2.2, v: 0, falling: false, a: 1, pill: true });
+        f.nextPillDrip = now + 120 + Math.random() * 180;
+      }
+    } else {
+      for (const d of f.drips) if (d.pill) d.falling = true;
+    }
 
     // drops: swell and stretch under the streak, then let go and fall, fading as they go
     for (const d of f.drips) {
