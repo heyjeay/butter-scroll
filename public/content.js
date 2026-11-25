@@ -30,7 +30,10 @@
   const SPRING = '.45s cubic-bezier(.25,1,.5,1)';
   const LATCH_MS = 300;        // a notch this soon after the last stays on a scroller that is still on its way
   const DRAG_START = 7;        // px the mouse travels before a press becomes a drag
-  const DRAG_SKIP = 'input, textarea, select, button, a, label, summary, video, audio, canvas, iframe, embed, object, img, svg, [contenteditable=""], [contenteditable="true"], [draggable="true"], [role="slider"], [role="scrollbar"]';
+  // Pressed on one of these, the mouse is not a finger: real controls and things with their own drag.
+  // Links, images and thumbnail videos are NOT here: like a phone, a tap still opens them and a drag scrolls
+  // (Chrome's own link/image drag-and-drop is cancelled while a press is pending)
+  const DRAG_SKIP = 'input, textarea, select, button, label, summary, video[controls], audio, canvas, iframe, embed, object, [contenteditable=""], [contenteditable="true"], [draggable="true"], [role="slider"], [role="scrollbar"], [role="button"]:not(a), [role="textbox"]';
 
   // the site being visited (an iframe follows the tab it sits in, so the popup's per-site switch covers it)
   const host = (() => {
@@ -319,10 +322,12 @@
     stopFling();
     if (!active || !cfg.dragScroll || e.pointerType !== 'mouse' || e.button !== 0) return;
     const t = e.composedPath()[0];
-    if (!(t instanceof Element) || t.closest(DRAG_SKIP) || pageScrollsItself()) return;
+    const path = e.composedPath();
+    if (!(t instanceof Element) || pageScrollsItself()) return;
+    if (path.some((n) => n instanceof Element && n.matches(DRAG_SKIP))) return; // the path crosses shadow roots, closest() does not
     if (onScrollbar(t, e)) return; // dragging a scrollbar thumb is the browser's job
 
-    press = { id: e.pointerId, x: e.clientX, y: e.clientY, path: e.composedPath(), dragging: false, samples: [[performance.now(), e.clientX, e.clientY]] };
+    press = { id: e.pointerId, x: e.clientX, y: e.clientY, path, dragging: false, samples: [[performance.now(), e.clientX, e.clientY]] };
   }, true);
 
   on(window, 'pointermove', (e) => {
@@ -380,10 +385,10 @@
   on(window, 'click', (e) => {
     if (Date.now() < swallowClickUntil) { swallowClickUntil = 0; e.stopPropagation(); e.preventDefault(); }
   }, true);
-  on(window, 'dragstart', (e) => { // a native drag (an image, a link) got there first: it wins
-    if (!press) return;
-    if (press.dragging) e.preventDefault(); else press = null;
-  }, true);
+  // Chrome starts dragging a link or image after ~4 px, before a press becomes a scroll at 7 px: with drag
+  // to scroll on, a press on a thumbnail is a finger, so that native drag is cancelled (draggable="true"
+  // elements, the ones a site built drag-and-drop around, never start a press in the first place)
+  on(window, 'dragstart', (e) => { if (press) e.preventDefault(); }, true);
 
   // keys and the scrollbar move the page themselves; a glide in flight would fight them
   const SCROLL_KEYS = new Set(['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'PageUp', 'PageDown', 'Home', 'End', ' ']);
