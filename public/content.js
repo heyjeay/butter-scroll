@@ -1,4 +1,4 @@
-// butter-scroll: the krp_phone scroll feel (html/js/touch.js) for any website.
+// Buttery Smooth: the krp_phone scroll feel (html/js/touch.js) for any website.
 //  - wheel: each notch moves a target, the page eases toward it every frame (1 - e^(-dt / smoothness)),
 //    notches that land mid-glide add to where it was heading
 //  - rubber band: past either end the content stretches a little and springs back (iOS curve)
@@ -8,7 +8,7 @@
   'use strict';
   const debug = false; // developer switch; anyone can also turn on "Debug log" in the popup (cfg.debug)
   let logOn = debug;
-  const log = (...a) => { if (logOn) console.log('%c[butter-scroll]', 'color:#d7a31a;font-weight:600', ...a); };
+  const log = (...a) => { if (logOn) console.log('%c[buttery-smooth]', 'color:#d7a31a;font-weight:600', ...a); };
   // one line per wheel decision, repeats of the same line folded together so spinning the wheel stays readable
   let lastWheelLog = '', lastWheelLogAt = 0;
   function logWheel(msg, ...extra) {
@@ -28,6 +28,8 @@
   // One engine per page. A newer copy (the extension was reloaded or updated, or the background worker
   // injected it into an already open tab) asks the old one to stand down instead of being turned away:
   // the old copy's chrome.* is dead after a reload, so it could no longer hear settings change.
+  // (internal names like this event, the butter-dragging class and storage keys keep the project's first
+  // name on purpose: renaming them would stop a new version from replacing the copy already running in a tab)
   window.dispatchEvent(new CustomEvent('butter-scroll:takeover'));
   const life = new AbortController();
   const on = (target, type, fn, opts) =>
@@ -249,7 +251,7 @@
   let latch = null; // { ref: WeakRef(scroller), hit, axis, at }: weak, so a removed SPA view is not kept alive
   function onWheel(e) {
     if (!alive()) { log('this copy belongs to an extension that was reloaded or removed: standing down (refresh the tab)'); teardown(); return; }
-    if (!active) { logWheel(!cfg.enabled ? 'skipped: Butter Scroll is off' : `skipped: switched off for ${host}`); return; }
+    if (!active) { logWheel(!cfg.enabled ? 'skipped: Buttery Smooth is off' : `skipped: switched off for ${host}`); return; }
     if (e.defaultPrevented) { logWheel('skipped: the page handled this wheel itself (preventDefault)', describe(e.target)); return; }
     if (e.ctrlKey || e.metaKey) { logWheel('skipped: ctrl+wheel zooms'); return; }
     if (!e.isTrusted && !allowSynthetic) { logWheel('skipped: a wheel event made by a script, not the mouse'); return; }
@@ -316,7 +318,7 @@
     if (captureMode) { onWheel(e); return; }
     if (inFlight) {
       vanished++;
-      logWheel('the page stopped a wheel event before it got back to Butter Scroll (stopPropagation)', describe(inFlight.target));
+      logWheel('the page stopped a wheel event before it got back to Buttery Smooth (stopPropagation)', describe(inFlight.target));
       if (vanished >= 2) {
         captureMode = true;
         inFlight = null;

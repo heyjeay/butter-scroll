@@ -2,7 +2,7 @@ import { reactive, ref, watch } from 'vue';
 import { DEFAULTS } from '../settings';
 
 const debug = false;
-const log = (...a) => { if (debug) console.log('[butter-scroll popup]', ...a); };
+const log = (...a) => { if (debug) console.log('[buttery-smooth popup]', ...a); };
 
 // chrome.storage.sync inside the extension; localStorage when the popup runs on the Vite dev server
 const store = typeof chrome !== 'undefined' && chrome.storage && chrome.storage.sync;

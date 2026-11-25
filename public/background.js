@@ -2,7 +2,7 @@
 // so tabs that were already open (a Reddit tab, say) would stay unsmoothed until refreshed.
 // Inject the engine into them right away; content.js tells any older copy in the page to stand down.
 const debug = false;
-const log = (...a) => { if (debug) console.log('[butter-scroll bg]', ...a); };
+const log = (...a) => { if (debug) console.log('[buttery-smooth bg]', ...a); };
 
 // Swipe to switch tabs: content.js asks, this picks the neighbour in the same window (wrapping like Ctrl+Tab)
 chrome.runtime.onMessage.addListener((msg, sender) => {

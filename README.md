@@ -1,4 +1,4 @@
-# Butter Scroll
+# Buttery Smooth
 
 The krp_phone scroll feel for every website, as a Chrome extension:
 

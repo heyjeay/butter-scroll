@@ -11,7 +11,7 @@ const { site, siteEnabled } = useCurrentSite();
 const siteStatus = computed(() => {
   if (!site.value) return '';
   if (!site.value.supported) return 'Chrome keeps extensions off this page.';
-  if (!settings.enabled) return 'Butter Scroll is off everywhere.';
+  if (!settings.enabled) return 'Buttery Smooth is off everywhere.';
   return siteEnabled.value ? 'Smooth here. Changes apply right away.' : 'Paused on this site.';
 });
 </script>
@@ -21,10 +21,10 @@ const siteStatus = computed(() => {
     <header class="flex items-center gap-3 px-4 pb-3 pt-4">
       <img src="/icons/48.png" alt="" class="size-8" />
       <div class="flex-1">
-        <h1 class="text-[15px] font-semibold leading-5">Butter Scroll</h1>
+        <h1 class="text-[15px] font-semibold leading-5">Buttery Smooth</h1>
         <p class="text-xs text-muted">Phone-smooth scrolling</p>
       </div>
-      <SwitchToggle v-model="settings.enabled" label="Butter Scroll on everywhere" />
+      <SwitchToggle v-model="settings.enabled" label="Buttery Smooth on everywhere" />
     </header>
 
     <section class="mx-3 rounded-xl border border-line bg-card">
