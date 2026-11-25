@@ -462,40 +462,26 @@
     const shadow = host.attachShadow({ mode: 'closed' });
     shadow.innerHTML = `<style>
       canvas { position: fixed; inset: 0; width: 100vw; height: 100vh; }
-      /* the pill is a pat of butter: creamy top, deeper bottom, a slightly uneven soft shape, a shine along
-         the top, and drips under it that lengthen (--p) as the swipe nears switching; it glints once ready */
-      .pill { position: fixed; top: 50%; padding: 10px 17px 11px; white-space: nowrap;
-        border-radius: 10px 13px 11px 9px / 9px 11px 13px 10px;
-        font: 700 13px/1 "Segoe UI", system-ui, sans-serif; color: #4a3506; text-shadow: 0 1px 0 rgb(255 248 214 / .6);
-        background: linear-gradient(180deg, #fff6c9 0%, #fbe27f 30%, ${BUTTER} 68%, #e9b93a 100%);
-        border: 1px solid #d9a521;
-        box-shadow: inset 0 1.5px 0 rgb(255 255 255 / .75), inset 0 -3px 2px rgb(201 140 14 / .35),
-          0 6px 16px rgb(0 0 0 / .28), 0 1px 2px rgb(0 0 0 / .2);
-        transition: opacity .3s, filter .2s, scale .3s cubic-bezier(.3, 1.6, .5, 1); }
-      .pill.ready { filter: brightness(1.04) saturate(1.12); scale: 1.05; }
-      .shine { position: absolute; top: 3px; left: 12%; width: 46%; height: 4px; border-radius: 999px;
-        background: linear-gradient(90deg, rgb(255 255 255 / 0), rgb(255 255 255 / .85) 30%, rgb(255 255 255 / .15)); }
-      .glint { position: absolute; inset: 0; border-radius: inherit; overflow: hidden; }
-      .glint::before { content: ''; position: absolute; top: -20%; bottom: -20%; width: 30%; left: 0;
-        background: linear-gradient(90deg, rgb(255 255 255 / 0), rgb(255 255 255 / .7), rgb(255 255 255 / 0));
-        transform: translateX(-150%) skewX(-20deg); }
-      .pill.ready .glint::before { animation: glint .7s ease-out; }
-      @keyframes glint { to { transform: translateX(420%) skewX(-20deg); } }
-      /* a drip: flares out of the butter (concave fillets), narrows to a neck, swells into a drop */
-      .drip { position: absolute; top: calc(100% - 3px); width: var(--w); margin-left: calc(var(--w) / -2);
-        height: calc(4px + var(--p, 0) * var(--l) * 1px); border-radius: 0 0 50% 50% / 0 0 6px 6px;
-        background: linear-gradient(90deg, #dda52a, #f0c447 45%, #d89f25); }
+      /* the pill: dark, then flat butter once letting go will switch; drips in the same flat colour run off
+         the bottom and lengthen (--p) as the swipe nears the switch point. The colours are opaque so the
+         drips join the pill without a seam (the pill's opacity fades the whole thing as one) */
+      .pill { --c: #1f1c16; position: fixed; top: 50%; padding: 10px 16px; border-radius: 999px; white-space: nowrap;
+        font: 600 13px/1 "Segoe UI", system-ui, sans-serif; color: #f2ede1; background: var(--c);
+        filter: drop-shadow(0 4px 9px rgb(0 0 0 / .25)); /* one shadow for the pill and its drips */
+        transition: background .15s, color .15s, opacity .3s; }
+      .pill.ready { --c: ${BUTTER}; color: ${BUTTER_INK}; }
+      /* a drip: flares out of the pill (concave fillets), narrows to a neck, ends in a round drop */
+      .drip { position: absolute; top: calc(100% - 2px); width: var(--w); margin-left: calc(var(--w) / -2);
+        height: calc(3px + var(--p, 0) * var(--l) * 1px); background: var(--c); transition: background .15s; }
       .drip::before { content: ''; position: absolute; top: 0; left: -5px; right: -5px; height: 6px;
-        background: radial-gradient(circle at 0 100%, transparent 5px, #e7b538 5.5px) left / 50% 100% no-repeat,
-          radial-gradient(circle at 100% 100%, transparent 5px, #e7b538 5.5px) right / 50% 100% no-repeat; }
-      .drip::after { content: ''; position: absolute; left: 50%; bottom: -5px; width: var(--b); height: calc(var(--b) * 1.12);
-        transform: translateX(-50%); border-radius: 50% 50% 50% 50% / 42% 42% 58% 58%;
-        background: radial-gradient(circle at 34% 30%, #fff0b0 0 12%, #f4cb52 38%, #d89f25 88%);
-        box-shadow: 0 2px 3px rgb(0 0 0 / .25); }
-      .d1 { left: 22%; --l: 9; --w: 4px; --b: 8px; }
-      .d2 { left: 55%; --l: 17; --w: 5px; --b: 10px; }
-      .d3 { left: 81%; --l: 6; --w: 3.5px; --b: 7px; }
-    </style><canvas></canvas><div class="pill"><span class="label"></span><i class="shine"></i><i class="glint"></i><i class="drip d1"></i><i class="drip d2"></i><i class="drip d3"></i></div>`;
+        background: radial-gradient(circle at 0 100%, transparent 5px, var(--c) 5.5px) left / 50% 100% no-repeat,
+          radial-gradient(circle at 100% 100%, transparent 5px, var(--c) 5.5px) right / 50% 100% no-repeat; }
+      .drip::after { content: ''; position: absolute; left: 50%; bottom: calc(var(--b) / -2); width: var(--b); height: var(--b);
+        transform: translateX(-50%); border-radius: 50%; background: var(--c); transition: background .15s; }
+      .d1 { left: 26%; --l: 9; --w: 4px; --b: 8px; }
+      .d2 { left: 56%; --l: 17; --w: 5px; --b: 10px; }
+      .d3 { left: 80%; --l: 6; --w: 3.5px; --b: 7px; }
+    </style><canvas></canvas><div class="pill"><span class="label"></span><i class="drip d1"></i><i class="drip d2"></i><i class="drip d3"></i></div>`;
     document.documentElement.appendChild(host);
     const canvas = shadow.querySelector('canvas');
     const dpr = window.devicePixelRatio || 1;
@@ -590,16 +576,23 @@
     for (const d of f.drips) {
       ctx.globalAlpha = Math.max(0, d.a) * (d.falling ? 1 : fade);
       grow(d.x, d.y, d.r * 3 + d.len + 4);
-      if (!d.falling) { // a teardrop hanging from the streak
+      if (!d.falling) { // hanging like the pill's drips: a flared join, a thin neck, a round drop that swells
+        const half = d.r * 0.375, flare = 4, top = d.y;
         ctx.beginPath();
-        ctx.moveTo(d.x - d.r * 0.55, d.y);
-        ctx.quadraticCurveTo(d.x - d.r * 0.35, d.y + d.len * 0.7, d.x - d.r, d.y + d.len);
-        ctx.arc(d.x, d.y + d.len, d.r, Math.PI, 0, true);
-        ctx.quadraticCurveTo(d.x + d.r * 0.35, d.y + d.len * 0.7, d.x + d.r * 0.55, d.y);
+        ctx.moveTo(d.x - half - flare, top);
+        ctx.quadraticCurveTo(d.x - half, top, d.x - half, top + flare);
+        ctx.lineTo(d.x - half, top + d.len);
+        ctx.lineTo(d.x + half, top + d.len);
+        ctx.lineTo(d.x + half, top + flare);
+        ctx.quadraticCurveTo(d.x + half, top, d.x + half + flare, top);
+        ctx.closePath();
         ctx.fill();
-      } else { // a falling drop, longer the faster it goes
         ctx.beginPath();
-        ctx.ellipse(d.x, d.y + d.len, d.r * 0.9, d.r * (1 + Math.min(1.4, d.v * 2)), 0, 0, Math.PI * 2);
+        ctx.arc(d.x, top + d.len, d.r * (0.55 + 0.45 * Math.min(1, d.len / d.max)), 0, Math.PI * 2);
+        ctx.fill();
+      } else { // broken off: a round drop, a touch longer the faster it falls
+        ctx.beginPath();
+        ctx.ellipse(d.x, d.y + d.len, d.r, d.r * (1 + Math.min(0.35, d.v)), 0, 0, Math.PI * 2);
         ctx.fill();
       }
     }
