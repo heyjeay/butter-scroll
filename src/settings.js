@@ -6,6 +6,7 @@ export const DEFAULTS = {
   bounce: true,
   dragScroll: false,
   swipeTabs: false,
+  swipeUpDown: true,
   swipeTrail: true,
   trackpad: true,
   disabledSites: [],

@@ -42,7 +42,8 @@
     stepScale: 1,      // multiplies how far one wheel notch goes
     bounce: true,      // rubber band at the ends
     dragScroll: false, // hold and drag the page like a phone
-    swipeTabs: false,  // hold the right button and drag sideways to go to the tab on that side
+    swipeTabs: false,  // right-drag gestures: drag left / right to go to the tab on that side
+    swipeUpDown: true, // with swipeTabs: drag up for a new tab, down to close this one
     swipeTrail: true,  // the dripping butter trail that follows a swipe
     trackpad: true,    // also smooth fine-step input: high-res / free-spin mouse wheels and trackpads (off = only classic notched wheels)
     disabledSites: [],
@@ -390,19 +391,28 @@
     press = null;
   }
 
-  // ---------------------------------------------------------------- swipe to switch tabs (opt-in): right-button drag
-  // Hold the right mouse button and drag sideways: drag right = the tab on the right, drag left = the tab on
-  // the left (wrapping like Ctrl+Tab). A plain right-click still opens the menu; only a sideways drag eats it.
-  // A streak of butter follows the cursor while it happens.
-  const SWIPE_DIST = 140; // px of sideways drag that switches the tab on release
-  const SWIPE_START = 12; // px sideways before a right press becomes a swipe
-  let swipe = null;       // { id, x, y, axis: 'x', active, samples }
-  let eatMenuUntil = 0;   // the context menu Windows opens on release after a swipe is not wanted
+  // ---------------------------------------------------------------- right-drag gestures (opt-in)
+  // Hold the right mouse button and drag: right = the tab on the right, left = the tab on the left (wrapping
+  // like Ctrl+Tab); up = a new tab next to this one, down = close this tab (its own switch, swipeUpDown).
+  // A plain right-click still opens the menu; only a gesture eats it. A streak of butter follows the cursor.
+  const SWIPE_DIST = 140; // px of drag that does the gesture on release
+  const SWIPE_START = 12; // px before a right press becomes a gesture
+  let swipe = null;       // { id, x, y, axis: 'x' | 'y', active, samples }
+  let eatMenuUntil = 0;   // the context menu Windows opens on release after a gesture is not wanted
 
-  function switchTab(dir) {
-    log('switching to the tab on the', dir > 0 ? 'right' : 'left');
-    try { chrome.runtime.sendMessage({ type: 'butter:switch-tab', dir }).catch(() => {}); } catch (err) { /* extension reloaded */ }
+  function tabAction(what, dir) {
+    log('gesture:', what, dir || '');
+    try { chrome.runtime.sendMessage({ type: `butter:${what}`, dir }).catch(() => {}); } catch (err) { /* extension reloaded */ }
   }
+  // what each direction does and what the pill says
+  const GESTURES = {
+    right: { label: 'Next tab →', run: () => tabAction('switch-tab', 1) },
+    left: { label: '← Previous tab', run: () => tabAction('switch-tab', -1) },
+    up: { label: 'New tab +', run: () => tabAction('new-tab') },
+    down: { label: 'Close tab ✕', run: () => tabAction('close-tab') },
+  };
+  const gestureOf = (s, dx, dy) => (s.axis === 'x' ? (dx > 0 ? 'right' : 'left') : (dy < 0 ? 'up' : 'down'));
+
   function endSwipe(e) {
     const s = swipe;
     swipe = null;
@@ -410,9 +420,9 @@
     eatMenuUntil = Date.now() + 600;
     let go = false;
     if (e) {
-      const dx = e.clientX - s.x, v = velocity(s);
-      go = Math.abs(dx) >= SWIPE_DIST || (Math.abs(dx) >= 50 && Math.abs(v) > 0.6 && Math.sign(v) === Math.sign(dx)); // far enough, or a flick
-      if (go) switchTab(dx > 0 ? 1 : -1);
+      const dx = e.clientX - s.x, dy = e.clientY - s.y, d = s.axis === 'x' ? dx : dy, v = velocity(s);
+      go = Math.abs(d) >= SWIPE_DIST || (Math.abs(d) >= 50 && Math.abs(v) > 0.6 && Math.sign(v) === Math.sign(d)); // far enough, or a flick
+      if (go) GESTURES[gestureOf(s, dx, dy)].run();
     }
     fxEnd(go);
   }
@@ -428,16 +438,20 @@
     swipe.samples.push([performance.now(), e.clientX, e.clientY]);
     if (swipe.samples.length > 12) swipe.samples.shift();
     if (!swipe.active) {
-      if (Math.abs(dy) > SWIPE_START && Math.abs(dy) > Math.abs(dx)) { swipe = null; return; } // up or down: not ours
-      if (Math.abs(dx) < SWIPE_START) return;
+      const ax = Math.abs(dx), ay = Math.abs(dy);
+      if (Math.max(ax, ay) < SWIPE_START) return;
+      if (ay > ax) {
+        if (!cfg.swipeUpDown) { swipe = null; return; } // up / down switched off: the menu is the browser's again
+        swipe.axis = 'y';
+      } else swipe.axis = 'x';
       swipe.active = true;
       // no butter-dragging class here: a right-button drag never selects text, and that class's
       // `html.butter-dragging *` rule restyles every element on the page (a hitch on big pages like Reddit)
       try { document.documentElement.setPointerCapture(swipe.id); } catch (err) { /* already gone */ }
       fxStart(swipe.x, swipe.y);
-      log('swipe for a tab');
+      log('gesture started', swipe.axis);
     }
-    fxMove(e.clientX, e.clientY, dx);
+    fxMove(e.clientX, e.clientY, swipe.axis === 'x' ? dx : dy, gestureOf(swipe, dx, dy));
   }, true);
   on(window, 'pointerup', (e) => { if (swipe && e.pointerId === swipe.id && e.button === 2) endSwipe(e); }, true);
   on(window, 'pointercancel', (e) => { if (swipe && e.pointerId === swipe.id) endSwipe(null); }, true);
@@ -464,7 +478,7 @@
       canvas { position: fixed; inset: 0; width: 100vw; height: 100vh; }
       /* the pill: dark, then flat butter once letting go will switch. Its drips are drawn on the canvas
          underneath (fxFrame), so they form, swell, break off and fall like the trail's */
-      .pill { position: fixed; top: 50%; padding: 10px 16px; border-radius: 999px; white-space: nowrap;
+      .pill { position: fixed; padding: 10px 16px; border-radius: 999px; white-space: nowrap;
         font: 600 13px/1 "Segoe UI", system-ui, sans-serif; color: #f2ede1; background: #1f1c16;
         box-shadow: 0 4px 18px rgb(0 0 0 / .25); transition: background .15s, color .15s, opacity .3s; }
       .pill.ready { background: ${BUTTER}; color: ${BUTTER_INK}; }
@@ -478,16 +492,16 @@
     ctx.scale(dpr, dpr);
     const trail = cfg.swipeTrail !== false; // the popup's "Butter trail" switch (off: just the pill)
     const t = performance.now();
-    fx = { host, ctx, pill: shadow.querySelector('.pill'), label: shadow.querySelector('.label'), pts: [{ x, y, t }], head: { x, y }, dx: 0, drips: [],
+    fx = { host, ctx, pill: shadow.querySelector('.pill'), label: shadow.querySelector('.label'), pts: [{ x, y, t }], head: { x, y }, d: 0, gesture: 'right', drips: [],
       raf: 0, last: null, nextDrip: 0, nextPillDrip: 0, pillW: 0, pillH: 0, ready: false, fadeAt: 0, switched: false, trail, box: null,
-      shown: { right: null, ready: null } }; // what the pill shows now, so it is only rewritten on a change
+      shown: { gesture: null, ready: null } }; // what the pill shows now, so it is only rewritten on a change
     fx.raf = requestAnimationFrame(fxFrame);
   }
   // pointermove only records; all drawing and DOM writes happen once a frame in fxFrame
-  function fxMove(x, y, dx) {
+  function fxMove(x, y, d, gesture) { // d: how far along the gesture's axis
     if (!fx) return;
     const now = performance.now();
-    fx.head.x = x; fx.head.y = y; fx.dx = dx;
+    fx.head.x = x; fx.head.y = y; fx.d = d; fx.gesture = gesture;
     const lastPt = fx.pts[fx.pts.length - 1];
     if (Math.hypot(x - lastPt.x, y - lastPt.y) >= 4) {
       fx.pts.push({ x, y, t: now });
@@ -504,23 +518,39 @@
     fx.switched = switched;
     if (!fx.raf) fx.raf = requestAnimationFrame(fxFrame);
   }
+  // where the pill sits for each gesture: at the edge it points to (left, right, top or bottom), sliding in
+  const PILL_AT = {
+    right: { left: 'auto', right: '12px', top: '50%', bottom: 'auto', move: (s) => `translate(${s}px, -50%)` },
+    left: { left: '12px', right: 'auto', top: '50%', bottom: 'auto', move: (s) => `translate(${-s}px, -50%)` },
+    up: { left: '50%', right: 'auto', top: '14px', bottom: 'auto', move: (s) => `translate(-50%, ${-s}px)` },
+    down: { left: '50%', right: 'auto', top: 'auto', bottom: '14px', move: (s) => `translate(-50%, ${s}px)` },
+  };
   function fxPill(f) {
-    const p = Math.min(1, Math.abs(f.dx) / SWIPE_DIST);
-    const right = f.dx > 0, ready = p >= 1;
+    const p = Math.min(1, Math.abs(f.d) / SWIPE_DIST);
+    const g = f.gesture, ready = p >= 1;
     f.ready = ready;
-    if (f.shown.right !== right) {
-      f.shown.right = right;
-      f.label.textContent = right ? 'Next tab →' : '← Previous tab';
-      f.pill.style.left = right ? 'auto' : '12px';
-      f.pill.style.right = right ? '12px' : 'auto';
-      f.pillW = f.pill.offsetWidth; // measured only when the text changes: where its drips can form
+    if (f.shown.gesture !== g) {
+      f.shown.gesture = g;
+      const at = PILL_AT[g];
+      f.label.textContent = GESTURES[g].label;
+      f.pill.style.left = at.left; f.pill.style.right = at.right; f.pill.style.top = at.top; f.pill.style.bottom = at.bottom;
+      f.pillW = f.pill.offsetWidth; // measured only when the pill changes: where its drips can form
       f.pillH = f.pill.offsetHeight;
+      f.shown.shift = null;
     }
     if (f.shown.ready !== ready) { f.shown.ready = ready; f.pill.classList.toggle('ready', ready); }
     const opacity = f.fadeAt ? (f.switched ? 1 : 0) : 0.25 + p * 0.75;
     if (f.shown.opacity !== opacity) { f.shown.opacity = opacity; f.pill.style.opacity = String(opacity); }
-    const shift = f.fadeAt ? 0 : Math.round((right ? 1 : -1) * (1 - p) * 40);
-    if (f.shown.shift !== shift) { f.shown.shift = shift; f.pill.style.transform = `translate(${shift}px, -50%)`; }
+    const shift = f.fadeAt ? 0 : Math.round((1 - p) * 40);
+    if (f.shown.shift !== shift) { f.shown.shift = shift; f.pill.style.transform = PILL_AT[g].move(shift); }
+  }
+  // the pill's bottom edge (where its drips form), worked out instead of read back from the page each frame
+  function pillBottom(f) {
+    const vw = document.documentElement.clientWidth, vh = document.documentElement.clientHeight;
+    const g = f.shown.gesture, w = f.pillW, h = f.pillH;
+    const x0 = g === 'right' ? vw - 12 - w : g === 'left' ? 12 : (vw - w) / 2;
+    const y = g === 'up' ? 14 + h : g === 'down' ? vh - 14 : vh / 2 + h / 2;
+    return { x0, y };
   }
   function fxClose() {
     if (!fx) return;
@@ -552,9 +582,8 @@
     // point, or once let go, the ones still hanging break off and fall
     if (f.ready && !f.fadeAt && f.pillW) {
       if (now >= f.nextPillDrip && f.drips.length < 60) {
-        const vw = document.documentElement.clientWidth, vh = document.documentElement.clientHeight;
-        const left = f.shown.right ? vw - 12 - f.pillW : 12;
-        f.drips.push({ x: left + 16 + Math.random() * (f.pillW - 32), y: vh / 2 + f.pillH / 2 - 3, len: 0,
+        const edge = pillBottom(f);
+        f.drips.push({ x: edge.x0 + 16 + Math.random() * (f.pillW - 32), y: edge.y - 3, len: 0,
           max: 6 + Math.random() * 16, r: 3 + Math.random() * 2.2, v: 0, falling: false, a: 1, pill: true });
         f.nextPillDrip = now + 120 + Math.random() * 180;
       }

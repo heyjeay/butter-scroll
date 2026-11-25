@@ -45,8 +45,11 @@ const siteStatus = computed(() => {
       <SettingRow title="Drag to scroll" hint="Hold the mouse and throw the page like a phone. Text selection is off while this is on.">
         <SwitchToggle v-model="settings.dragScroll" label="Drag to scroll" :disabled="!settings.enabled" />
       </SettingRow>
-      <SettingRow title="Swipe to switch tabs" hint="Hold the right mouse button and drag left or right to go to the tab on that side. A plain right-click still opens the menu.">
-        <SwitchToggle v-model="settings.swipeTabs" label="Swipe to switch tabs" :disabled="!settings.enabled" />
+      <SettingRow title="Right-drag gestures" hint="Hold the right mouse button and drag left or right to go to the tab on that side. A plain right-click still opens the menu.">
+        <SwitchToggle v-model="settings.swipeTabs" label="Right-drag gestures" :disabled="!settings.enabled" />
+      </SettingRow>
+      <SettingRow v-if="settings.swipeTabs" title="Up for new tab, down to close" hint="Drag up to open a new tab, down to close this one. Ctrl+Shift+T brings a closed tab back.">
+        <SwitchToggle v-model="settings.swipeUpDown" label="Up for new tab, down to close" :disabled="!settings.enabled" />
       </SettingRow>
       <SettingRow v-if="settings.swipeTabs" title="Butter trail" hint="A streak of melting butter follows the swipe. Off: just the tab pill.">
         <SwitchToggle v-model="settings.swipeTrail" label="Butter trail" :disabled="!settings.enabled" />

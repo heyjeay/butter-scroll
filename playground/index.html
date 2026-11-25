@@ -38,7 +38,7 @@
       <label><input type="checkbox" name="enabled" checked> On</label>
       <label><input type="checkbox" name="bounce" checked> Rubber band</label>
       <label><input type="checkbox" name="dragScroll"> Drag to scroll</label>
-      <label><input type="checkbox" name="swipeTabs"> Swipe tabs (right-drag)</label>
+      <label><input type="checkbox" name="swipeTabs"> Right-drag gestures</label>
       <span id="swipes"></span>
       <label><input type="checkbox" name="trackpad"> Trackpads too</label>
       <label>Smoothness <input type="range" name="smoothness" min="40" max="300" step="5" value="110"></label>
@@ -69,7 +69,7 @@
         id: 'playground',
         sendMessage: async (msg) => {
           (window.__swipes = window.__swipes || []).push(msg);
-          document.getElementById('swipes').textContent = `last swipe: ${msg.dir > 0 ? 'next' : 'previous'} tab`;
+          document.getElementById('swipes').textContent = `last gesture: ${msg.type.replace('butter:', '')}${msg.dir ? (msg.dir > 0 ? ' right' : ' left') : ''}`;
         },
       };
       chrome.storage = {

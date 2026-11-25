@@ -4,10 +4,21 @@
 const debug = false;
 const log = (...a) => { if (debug) console.log('[buttery-smooth bg]', ...a); };
 
-// Swipe to switch tabs: content.js asks, this picks the neighbour in the same window (wrapping like Ctrl+Tab)
+// Right-drag gestures from content.js: a new tab right after this one (drag up), close this one (drag down),
+// or switch to the neighbour in the same window, wrapping like Ctrl+Tab (drag left / right)
 chrome.runtime.onMessage.addListener((msg, sender) => {
-  if (!msg || msg.type !== 'butter:switch-tab' || !sender.tab) return;
+  if (!msg || !sender.tab) return;
   const from = sender.tab;
+  if (msg.type === 'butter:new-tab') {
+    chrome.tabs.create({ windowId: from.windowId, index: from.index + 1, active: true })
+      .catch((err) => log('new tab failed', err && err.message));
+    return;
+  }
+  if (msg.type === 'butter:close-tab') {
+    chrome.tabs.remove(from.id).catch((err) => log('close failed', err && err.message)); // Ctrl+Shift+T brings it back
+    return;
+  }
+  if (msg.type !== 'butter:switch-tab') return;
   chrome.tabs.query({ windowId: from.windowId }).then((tabs) => {
     tabs.sort((a, b) => a.index - b.index);
     const i = tabs.findIndex((t) => t.id === from.id);
