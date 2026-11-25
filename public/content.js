@@ -407,7 +407,6 @@
     const s = swipe;
     swipe = null;
     if (!s || !s.active) return;
-    document.documentElement.classList.remove('butter-dragging');
     eatMenuUntil = Date.now() + 600;
     let go = false;
     if (e) {
@@ -432,8 +431,8 @@
       if (Math.abs(dy) > SWIPE_START && Math.abs(dy) > Math.abs(dx)) { swipe = null; return; } // up or down: not ours
       if (Math.abs(dx) < SWIPE_START) return;
       swipe.active = true;
-      ensureDragStyle();
-      document.documentElement.classList.add('butter-dragging');
+      // no butter-dragging class here: a right-button drag never selects text, and that class's
+      // `html.butter-dragging *` rule restyles every element on the page (a hitch on big pages like Reddit)
       try { document.documentElement.setPointerCapture(swipe.id); } catch (err) { /* already gone */ }
       fxStart(swipe.x, swipe.y);
       log('swipe for a tab');
@@ -448,9 +447,13 @@
 
   // ---------------------------------------------------------------- the butter trail
   // One canvas over the page (in a closed shadow root, out of the site's CSS) that lives only while a swipe
-  // runs and melts away after: a glossy streak along the path, a pat of butter at the cursor, and drops that
-  // swell under the streak, stretch, and fall. A pill at the edge says which tab letting go goes to.
+  // runs and melts away after: a glossy comet tail behind the cursor, a pat of butter at the cursor, and
+  // drops that swell under the tail, stretch, and fall. A pill at the edge says which tab letting go goes to.
+  // Cost is bounded however long the drag goes on: the tail is only the last TAIL_MS of movement, each frame
+  // clears just the area drawn last time, and the pill's DOM is touched once a frame, only when it changes
+  // (a gaming mouse sends up to 1000 moves a second; redrawing the whole scribble on each frame lagged).
   const BUTTER = '#f6cf57', BUTTER_DEEP = '#d39b12', BUTTER_INK = '#3b2d05';
+  const TAIL_MS = 380, TAIL_PTS = 48;
   let fx = null;
   function fxStart(x, y) {
     fxClose();
@@ -472,36 +475,48 @@
     const ctx = canvas.getContext('2d');
     ctx.scale(dpr, dpr);
     const trail = cfg.swipeTrail !== false; // the popup's "Butter trail" switch (off: just the pill)
-    fx = { host, ctx, pill: shadow.querySelector('.pill'), pts: [{ x, y }], drips: [], raf: 0, last: null,
-      nextDrip: 0, ready: false, fadeAt: 0, trail };
+    const t = performance.now();
+    fx = { host, ctx, pill: shadow.querySelector('.pill'), pts: [{ x, y, t }], head: { x, y }, dx: 0, drips: [],
+      raf: 0, last: null, nextDrip: 0, ready: false, fadeAt: 0, switched: false, trail, box: null,
+      shown: { right: null, ready: null } }; // what the pill shows now, so it is only rewritten on a change
     fx.raf = requestAnimationFrame(fxFrame);
   }
+  // pointermove only records; all drawing and DOM writes happen once a frame in fxFrame
   function fxMove(x, y, dx) {
     if (!fx) return;
-    const lastPt = fx.pts[fx.pts.length - 1];
-    if (Math.hypot(x - lastPt.x, y - lastPt.y) >= 3) fx.pts.push({ x, y });
-    if (fx.pts.length > 120) fx.pts = fx.pts.filter((_, i) => i % 2 === 0 || i > fx.pts.length - 30); // thin the old part
-    const p = Math.min(1, Math.abs(dx) / SWIPE_DIST);
-    fx.ready = p >= 1;
-    const right = dx > 0;
-    fx.pill.textContent = right ? 'Next tab →' : '← Previous tab';
-    fx.pill.classList.toggle('ready', fx.ready);
-    fx.pill.style.left = right ? 'auto' : '12px';
-    fx.pill.style.right = right ? '12px' : 'auto';
-    fx.pill.style.opacity = String(0.25 + p * 0.75);
-    fx.pill.style.transform = `translate(${(right ? 1 : -1) * (1 - p) * 40}px, -50%)`;
     const now = performance.now();
-    if (fx.trail && now >= fx.nextDrip && fx.drips.length < 40 && fx.pts.length > 2) { // a drop swells somewhere along the fresh end
-      const at = fx.pts[Math.max(0, fx.pts.length - 1 - Math.floor(Math.random() * 6))];
-      fx.drips.push({ x: at.x + (Math.random() - 0.5) * 6, y: at.y + 4, len: 0, max: 8 + Math.random() * 22, r: 2.6 + Math.random() * 2.6, v: 0, falling: false, a: 1 });
-      fx.nextDrip = now + 45 + Math.random() * 70;
+    fx.head.x = x; fx.head.y = y; fx.dx = dx;
+    const lastPt = fx.pts[fx.pts.length - 1];
+    if (Math.hypot(x - lastPt.x, y - lastPt.y) >= 4) {
+      fx.pts.push({ x, y, t: now });
+      if (fx.pts.length > TAIL_PTS) fx.pts.shift();
+      if (fx.trail && now >= fx.nextDrip && fx.drips.length < 40) { // a drop swells somewhere along the fresh end
+        fx.drips.push({ x: x + (Math.random() - 0.5) * 8, y: y + 4, len: 0, max: 8 + Math.random() * 22, r: 2.6 + Math.random() * 2.6, v: 0, falling: false, a: 1 });
+        fx.nextDrip = now + 45 + Math.random() * 70;
+      }
     }
   }
   function fxEnd(switched) {
     if (!fx) return;
     fx.fadeAt = performance.now();
-    fx.pill.style.opacity = switched ? '1' : '0';
+    fx.switched = switched;
     if (!fx.raf) fx.raf = requestAnimationFrame(fxFrame);
+  }
+  function fxPill(f) {
+    const p = Math.min(1, Math.abs(f.dx) / SWIPE_DIST);
+    const right = f.dx > 0, ready = p >= 1;
+    f.ready = ready;
+    if (f.shown.right !== right) {
+      f.shown.right = right;
+      f.pill.textContent = right ? 'Next tab →' : '← Previous tab';
+      f.pill.style.left = right ? 'auto' : '12px';
+      f.pill.style.right = right ? '12px' : 'auto';
+    }
+    if (f.shown.ready !== ready) { f.shown.ready = ready; f.pill.classList.toggle('ready', ready); }
+    const opacity = f.fadeAt ? (f.switched ? 1 : 0) : 0.25 + p * 0.75;
+    if (f.shown.opacity !== opacity) { f.shown.opacity = opacity; f.pill.style.opacity = String(opacity); }
+    const shift = f.fadeAt ? 0 : Math.round((right ? 1 : -1) * (1 - p) * 40);
+    if (f.shown.shift !== shift) { f.shown.shift = shift; f.pill.style.transform = `translate(${shift}px, -50%)`; }
   }
   function fxClose() {
     if (!fx) return;
@@ -515,9 +530,18 @@
     f.raf = 0;
     const dt = f.last === null ? 16 : Math.min(40, now - f.last);
     f.last = now;
-    const fade = f.fadeAt ? Math.max(0, 1 - (now - f.fadeAt) / 420) : 1; // the streak melts away after release
+    const fade = f.fadeAt ? Math.max(0, 1 - (now - f.fadeAt) / 420) : 1; // the pat melts away after release
     const ctx = f.ctx;
-    ctx.clearRect(0, 0, innerWidth, innerHeight);
+    fxPill(f);
+    // clear only what was drawn last frame, and keep a box of what this frame draws
+    if (f.box) ctx.clearRect(f.box.x0, f.box.y0, f.box.x1 - f.box.x0, f.box.y1 - f.box.y0);
+    const box = { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity };
+    const grow = (x, y, m) => {
+      if (x - m < box.x0) box.x0 = x - m; if (y - m < box.y0) box.y0 = y - m;
+      if (x + m > box.x1) box.x1 = x + m; if (y + m > box.y1) box.y1 = y + m;
+    };
+    // the tail is the last TAIL_MS of movement: it follows the cursor and pulls back into the pat when it stops
+    while (f.pts.length > 1 && now - f.pts[0].t > TAIL_MS) f.pts.shift();
 
     // drops: swell and stretch under the streak, then let go and fall, fading as they go
     for (const d of f.drips) {
@@ -534,6 +558,7 @@
     ctx.fillStyle = BUTTER;
     for (const d of f.drips) {
       ctx.globalAlpha = Math.max(0, d.a) * (d.falling ? 1 : fade);
+      grow(d.x, d.y, d.r * 3 + d.len + 4);
       if (!d.falling) { // a teardrop hanging from the streak
         ctx.beginPath();
         ctx.moveTo(d.x - d.r * 0.55, d.y);
@@ -548,40 +573,50 @@
       }
     }
 
-    // the streak: a darker rim, the butter, and a soft shine along the top
-    if (f.trail && fade > 0 && f.pts.length > 1) {
-      ctx.lineCap = 'round';
-      ctx.lineJoin = 'round';
-      const path = () => {
-        ctx.beginPath();
-        ctx.moveTo(f.pts[0].x, f.pts[0].y);
-        for (let i = 1; i < f.pts.length - 1; i++) { // smooth through midpoints
-          const a = f.pts[i], b = f.pts[i + 1];
-          ctx.quadraticCurveTo(a.x, a.y, (a.x + b.x) / 2, (a.y + b.y) / 2);
-        }
-        const last = f.pts[f.pts.length - 1];
-        ctx.lineTo(last.x, last.y);
-      };
-      ctx.globalAlpha = fade * 0.9;
-      ctx.strokeStyle = BUTTER_DEEP; ctx.lineWidth = 15; path(); ctx.stroke();
-      ctx.globalAlpha = fade;
-      ctx.strokeStyle = BUTTER; ctx.lineWidth = 11; path(); ctx.stroke();
-      ctx.globalAlpha = fade * 0.5;
-      ctx.save(); ctx.translate(0, -2.5);
-      ctx.strokeStyle = '#fff8dc'; ctx.lineWidth = 2.5; path(); ctx.stroke();
-      ctx.restore();
-    }
-    // the pat of butter at the cursor: bigger and brighter once letting go will switch
+    // the tail: smooth through the points' midpoints, tapering from thin (oldest) to full width at the pat;
+    // a darker rim pass first, then the butter, then a soft shine along the newer half
+    const pts = f.pts.slice();
+    const h = f.head;
+    if (pts.length && (pts[pts.length - 1].x !== h.x || pts[pts.length - 1].y !== h.y)) pts.push(h);
+    // the front is just the tail's own rounded end, the width of the tail (no blob), drawn in the same
+    // passes so the rim never rings it; it stays visible while the cursor holds still and the tail pulls in
     if (f.trail && fade > 0) {
-      const h = f.pts[f.pts.length - 1];
-      const r = f.ready ? 12 + Math.sin(now / 90) * 1.2 : 10;
-      ctx.globalAlpha = fade;
-      ctx.fillStyle = BUTTER_DEEP; ctx.beginPath(); ctx.arc(h.x, h.y, r + 2, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = BUTTER; ctx.beginPath(); ctx.arc(h.x, h.y, r, 0, Math.PI * 2); ctx.fill();
-      ctx.globalAlpha = fade * 0.7;
-      ctx.fillStyle = '#fffbe6'; ctx.beginPath(); ctx.ellipse(h.x - r * 0.35, h.y - r * 0.4, r * 0.38, r * 0.22, -0.5, 0, Math.PI * 2); ctx.fill();
+      ctx.lineCap = 'round';
+      const n = pts.length;
+      for (const p of pts) grow(p.x, p.y, 18); // every point, the oldest too, or its piece is never cleared
+      const seg = (i) => { // the piece of the curve around point i
+        const a = pts[i - 1], b = pts[i], c = pts[i + 1] || b;
+        ctx.beginPath();
+        ctx.moveTo(i === 1 ? a.x : (a.x + b.x) / 2, i === 1 ? a.y : (a.y + b.y) / 2);
+        ctx.quadraticCurveTo(b.x, b.y, (b.x + c.x) / 2, (b.y + c.y) / 2);
+      };
+      for (let pass = 0; pass < 2; pass++) {
+        ctx.strokeStyle = pass ? BUTTER : BUTTER_DEEP;
+        ctx.globalAlpha = fade * (pass ? 1 : 0.9);
+        for (let i = 1; i < n; i++) {
+          const w = 2 + 9 * (i / (n - 1)); // thin at the old end, full by the pat
+          ctx.lineWidth = pass ? w : w + 4;
+          seg(i);
+          ctx.stroke();
+        }
+        ctx.fillStyle = ctx.strokeStyle; // the rounded front
+        ctx.beginPath();
+        ctx.arc(h.x, h.y, pass ? 5.5 : 7.5, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      if (n > 2) {
+        ctx.globalAlpha = fade * 0.5;
+        ctx.strokeStyle = '#fff8dc';
+        ctx.lineWidth = 2.2;
+        ctx.beginPath();
+        const from = Math.floor(n / 2);
+        ctx.moveTo(pts[from].x, pts[from].y - 2.5);
+        for (let i = from + 1; i < n; i++) ctx.lineTo(pts[i].x, pts[i].y - 2.5);
+        ctx.stroke();
+      }
     }
     ctx.globalAlpha = 1;
+    f.box = box.x0 === Infinity ? null : box;
     if (f.fadeAt && fade <= 0 && !f.drips.length) { fxClose(); return; }
     f.raf = requestAnimationFrame(fxFrame);
   }
@@ -668,7 +703,6 @@
     stopGlides();
     stopFling();
     endPress();
-    if (swipe && swipe.active) document.documentElement.classList.remove('butter-dragging');
     swipe = null;
     fxClose();
     for (const el of [...stretched.keys()]) restore(el);
