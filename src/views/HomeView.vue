@@ -45,11 +45,11 @@ const siteStatus = computed(() => {
       <SettingRow title="Drag to scroll" hint="Hold the mouse and throw the page like a phone. Text selection is off while this is on.">
         <SwitchToggle v-model="settings.dragScroll" label="Drag to scroll" :disabled="!settings.enabled" />
       </SettingRow>
-      <SettingRow
-        title="Swipe to switch tabs"
-        :hint="settings.dragScroll ? 'Flick the page left for the next tab, right for the previous one.' : 'Needs Drag to scroll. Flick the page left or right to change tab.'"
-      >
-        <SwitchToggle v-model="settings.swipeTabs" label="Swipe to switch tabs" :disabled="!settings.enabled || !settings.dragScroll" />
+      <SettingRow title="Swipe to switch tabs" hint="Hold the right mouse button and drag left or right to go to the tab on that side. A plain right-click still opens the menu.">
+        <SwitchToggle v-model="settings.swipeTabs" label="Swipe to switch tabs" :disabled="!settings.enabled" />
+      </SettingRow>
+      <SettingRow v-if="settings.swipeTabs" title="Butter trail" hint="A streak of melting butter follows the swipe. Off: just the tab pill.">
+        <SwitchToggle v-model="settings.swipeTrail" label="Butter trail" :disabled="!settings.enabled" />
       </SettingRow>
       <SettingRow title="Smooth every wheel" hint="Includes high-res and free-spin mouse wheels and trackpads. Off: only classic notched wheels are smoothed.">
         <SwitchToggle v-model="settings.trackpad" label="Smooth every wheel" :disabled="!settings.enabled" />

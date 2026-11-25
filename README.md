@@ -5,7 +5,7 @@ The krp_phone scroll feel for every website, as a Chrome extension:
 - **Eased wheel glide.** Each wheel notch sets a target and the page eases toward it every frame (`1 - e^(-dt / smoothness)`, 110 ms by default). Notches that land mid-glide add onto it.
 - **Rubber-band ends.** Past the top or bottom the content stretches a little, then springs back on the iOS curve. Fixed headers stay put.
 - **Drag to scroll (opt-in).** Hold the mouse and throw the page like a phone, with momentum on release.
-- **Swipe to switch tabs (opt-in, with drag to scroll).** Flick the page left for the next tab, right for the previous one. It only fires where nothing scrolls sideways, and carousels that handle their own swipes keep them.
+- **Swipe to switch tabs (opt-in).** Hold the right mouse button and drag left or right to go to the tab on that side, with a dripping butter trail under the cursor. A plain right-click still opens the menu.
 
 Sites that run their own smooth scrolling (Lenis, Locomotive, GSAP ScrollSmoother) keep it. So do maps and editors that handle the wheel themselves, and scroll-snap carousels. Every wheel is smoothed by default, including high-res and free-spin mouse wheels and trackpads; "Smooth every wheel" off limits it to classic notched wheels. Ctrl+wheel still zooms.
 

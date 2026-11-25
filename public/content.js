@@ -42,7 +42,8 @@
     stepScale: 1,      // multiplies how far one wheel notch goes
     bounce: true,      // rubber band at the ends
     dragScroll: false, // hold and drag the page like a phone
-    swipeTabs: false,  // with dragScroll: flick sideways where nothing scrolls sideways to change tab
+    swipeTabs: false,  // hold the right button and drag sideways to go to the tab on that side
+    swipeTrail: true,  // the dripping butter trail that follows a swipe
     trackpad: true,    // also smooth fine-step input: high-res / free-spin mouse wheels and trackpads (off = only classic notched wheels)
     disabledSites: [],
     debug: false,      // log every decision to the page's console (F12)
@@ -386,52 +387,203 @@
   function endPress() {
     if (!press) return;
     if (press.dragging) document.documentElement.classList.remove('butter-dragging');
-    if (press.swipe) hideSwipe();
     press = null;
   }
 
-  // ---------------------------------------------------------------- swipe to switch tabs (opt-in, with drag to scroll)
+  // ---------------------------------------------------------------- swipe to switch tabs (opt-in): right-button drag
+  // Hold the right mouse button and drag sideways: drag right = the tab on the right, drag left = the tab on
+  // the left (wrapping like Ctrl+Tab). A plain right-click still opens the menu; only a sideways drag eats it.
+  // A streak of butter follows the cursor while it happens.
   const SWIPE_DIST = 140; // px of sideways drag that switches the tab on release
-  // carousels and sliders that take sideways drags themselves say so with touch-action (pan-y / none): theirs
-  function ownsSideways(path) {
-    return path.some((n) => {
-      if (!(n instanceof Element)) return false;
-      const ta = getComputedStyle(n).touchAction;
-      return ta !== 'auto' && ta !== 'manipulation' && !ta.includes('pan-x');
-    });
-  }
+  const SWIPE_START = 12; // px sideways before a right press becomes a swipe
+  let swipe = null;       // { id, x, y, axis: 'x', active, samples }
+  let eatMenuUntil = 0;   // the context menu Windows opens on release after a swipe is not wanted
+
   function switchTab(dir) {
-    log('switching tab', dir > 0 ? 'next' : 'previous');
+    log('switching to the tab on the', dir > 0 ? 'right' : 'left');
     try { chrome.runtime.sendMessage({ type: 'butter:switch-tab', dir }).catch(() => {}); } catch (err) { /* extension reloaded */ }
   }
-  // a pill at the edge the next tab comes from: follows the drag, fills in once letting go will switch
-  let swipeHost = null, swipePill = null;
-  function showSwipe(dx) {
-    if (!swipeHost || !swipeHost.isConnected) {
-      swipeHost = document.createElement('div');
-      swipeHost.style.cssText = 'position:fixed;inset:0;pointer-events:none;z-index:2147483647;';
-      const shadow = swipeHost.attachShadow({ mode: 'closed' }); // the site's CSS cannot reach it
-      shadow.innerHTML = `<style>
-        .pill { position: fixed; top: 50%; padding: 10px 16px; border-radius: 999px; font: 600 13px/1 "Segoe UI", system-ui, sans-serif;
-          color: #f2ede1; background: rgb(26 24 19 / .82); box-shadow: 0 4px 18px rgb(0 0 0 / .25); white-space: nowrap;
-          transition: background .15s, color .15s; }
-        .pill.ready { background: #f6cf57; color: #3b2d05; }
-      </style><div class="pill"></div>`;
-      swipePill = shadow.querySelector('.pill');
-      document.documentElement.appendChild(swipeHost);
+  function endSwipe(e) {
+    const s = swipe;
+    swipe = null;
+    if (!s || !s.active) return;
+    document.documentElement.classList.remove('butter-dragging');
+    eatMenuUntil = Date.now() + 600;
+    let go = false;
+    if (e) {
+      const dx = e.clientX - s.x, v = velocity(s);
+      go = Math.abs(dx) >= SWIPE_DIST || (Math.abs(dx) >= 50 && Math.abs(v) > 0.6 && Math.sign(v) === Math.sign(dx)); // far enough, or a flick
+      if (go) switchTab(dx > 0 ? 1 : -1);
     }
-    const p = Math.min(1, Math.abs(dx) / SWIPE_DIST);
-    const next = dx < 0;
-    swipePill.textContent = next ? 'Next tab →' : '← Previous tab';
-    swipePill.classList.toggle('ready', p >= 1);
-    swipePill.style.left = next ? 'auto' : '12px';
-    swipePill.style.right = next ? '12px' : 'auto';
-    swipePill.style.opacity = String(0.25 + p * 0.75);
-    swipePill.style.transform = `translate(${(next ? 1 : -1) * (1 - p) * 40}px, -50%)`;
+    fxEnd(go);
   }
-  function hideSwipe() {
-    if (swipeHost) swipeHost.remove();
-    swipeHost = swipePill = null;
+
+  on(window, 'pointerdown', (e) => {
+    if (!active || !cfg.swipeTabs || e.pointerType !== 'mouse' || e.button !== 2) return;
+    swipe = { id: e.pointerId, x: e.clientX, y: e.clientY, axis: 'x', active: false, samples: [[performance.now(), e.clientX, e.clientY]] };
+  }, true);
+  on(window, 'pointermove', (e) => {
+    if (!swipe || e.pointerId !== swipe.id) return;
+    if (!(e.buttons & 2)) { endSwipe(null); return; } // the button came up somewhere we did not hear
+    const dx = e.clientX - swipe.x, dy = e.clientY - swipe.y;
+    swipe.samples.push([performance.now(), e.clientX, e.clientY]);
+    if (swipe.samples.length > 12) swipe.samples.shift();
+    if (!swipe.active) {
+      if (Math.abs(dy) > SWIPE_START && Math.abs(dy) > Math.abs(dx)) { swipe = null; return; } // up or down: not ours
+      if (Math.abs(dx) < SWIPE_START) return;
+      swipe.active = true;
+      ensureDragStyle();
+      document.documentElement.classList.add('butter-dragging');
+      try { document.documentElement.setPointerCapture(swipe.id); } catch (err) { /* already gone */ }
+      fxStart(swipe.x, swipe.y);
+      log('swipe for a tab');
+    }
+    fxMove(e.clientX, e.clientY, dx);
+  }, true);
+  on(window, 'pointerup', (e) => { if (swipe && e.pointerId === swipe.id && e.button === 2) endSwipe(e); }, true);
+  on(window, 'pointercancel', (e) => { if (swipe && e.pointerId === swipe.id) endSwipe(null); }, true);
+  on(window, 'contextmenu', (e) => {
+    if ((swipe && swipe.active) || Date.now() < eatMenuUntil) { eatMenuUntil = 0; e.preventDefault(); e.stopPropagation(); }
+  }, true);
+
+  // ---------------------------------------------------------------- the butter trail
+  // One canvas over the page (in a closed shadow root, out of the site's CSS) that lives only while a swipe
+  // runs and melts away after: a glossy streak along the path, a pat of butter at the cursor, and drops that
+  // swell under the streak, stretch, and fall. A pill at the edge says which tab letting go goes to.
+  const BUTTER = '#f6cf57', BUTTER_DEEP = '#d39b12', BUTTER_INK = '#3b2d05';
+  let fx = null;
+  function fxStart(x, y) {
+    fxClose();
+    const host = document.createElement('div');
+    host.style.cssText = 'position:fixed;inset:0;pointer-events:none;z-index:2147483647;';
+    const shadow = host.attachShadow({ mode: 'closed' });
+    shadow.innerHTML = `<style>
+      canvas { position: fixed; inset: 0; width: 100vw; height: 100vh; }
+      .pill { position: fixed; top: 50%; padding: 10px 16px; border-radius: 999px; font: 600 13px/1 "Segoe UI", system-ui, sans-serif;
+        color: #f2ede1; background: rgb(26 24 19 / .82); box-shadow: 0 4px 18px rgb(0 0 0 / .25); white-space: nowrap;
+        transition: background .15s, color .15s, opacity .3s; }
+      .pill.ready { background: ${BUTTER}; color: ${BUTTER_INK}; }
+    </style><canvas></canvas><div class="pill"></div>`;
+    document.documentElement.appendChild(host);
+    const canvas = shadow.querySelector('canvas');
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = Math.round(innerWidth * dpr);
+    canvas.height = Math.round(innerHeight * dpr);
+    const ctx = canvas.getContext('2d');
+    ctx.scale(dpr, dpr);
+    const trail = cfg.swipeTrail !== false; // the popup's "Butter trail" switch (off: just the pill)
+    fx = { host, ctx, pill: shadow.querySelector('.pill'), pts: [{ x, y }], drips: [], raf: 0, last: null,
+      nextDrip: 0, ready: false, fadeAt: 0, trail };
+    fx.raf = requestAnimationFrame(fxFrame);
+  }
+  function fxMove(x, y, dx) {
+    if (!fx) return;
+    const lastPt = fx.pts[fx.pts.length - 1];
+    if (Math.hypot(x - lastPt.x, y - lastPt.y) >= 3) fx.pts.push({ x, y });
+    if (fx.pts.length > 120) fx.pts = fx.pts.filter((_, i) => i % 2 === 0 || i > fx.pts.length - 30); // thin the old part
+    const p = Math.min(1, Math.abs(dx) / SWIPE_DIST);
+    fx.ready = p >= 1;
+    const right = dx > 0;
+    fx.pill.textContent = right ? 'Next tab →' : '← Previous tab';
+    fx.pill.classList.toggle('ready', fx.ready);
+    fx.pill.style.left = right ? 'auto' : '12px';
+    fx.pill.style.right = right ? '12px' : 'auto';
+    fx.pill.style.opacity = String(0.25 + p * 0.75);
+    fx.pill.style.transform = `translate(${(right ? 1 : -1) * (1 - p) * 40}px, -50%)`;
+    const now = performance.now();
+    if (fx.trail && now >= fx.nextDrip && fx.drips.length < 40 && fx.pts.length > 2) { // a drop swells somewhere along the fresh end
+      const at = fx.pts[Math.max(0, fx.pts.length - 1 - Math.floor(Math.random() * 6))];
+      fx.drips.push({ x: at.x + (Math.random() - 0.5) * 6, y: at.y + 4, len: 0, max: 8 + Math.random() * 22, r: 2.6 + Math.random() * 2.6, v: 0, falling: false, a: 1 });
+      fx.nextDrip = now + 45 + Math.random() * 70;
+    }
+  }
+  function fxEnd(switched) {
+    if (!fx) return;
+    fx.fadeAt = performance.now();
+    fx.pill.style.opacity = switched ? '1' : '0';
+    if (!fx.raf) fx.raf = requestAnimationFrame(fxFrame);
+  }
+  function fxClose() {
+    if (!fx) return;
+    cancelAnimationFrame(fx.raf);
+    fx.host.remove();
+    fx = null;
+  }
+  function fxFrame(now) {
+    const f = fx;
+    if (!f) return;
+    f.raf = 0;
+    const dt = f.last === null ? 16 : Math.min(40, now - f.last);
+    f.last = now;
+    const fade = f.fadeAt ? Math.max(0, 1 - (now - f.fadeAt) / 420) : 1; // the streak melts away after release
+    const ctx = f.ctx;
+    ctx.clearRect(0, 0, innerWidth, innerHeight);
+
+    // drops: swell and stretch under the streak, then let go and fall, fading as they go
+    for (const d of f.drips) {
+      if (!d.falling) {
+        d.len += dt * 0.05;
+        if (d.len >= d.max) d.falling = true;
+      } else {
+        d.v += dt * 0.0022;
+        d.y += d.v * dt;
+        d.a -= dt / 900;
+      }
+    }
+    f.drips = f.drips.filter((d) => d.a > 0 && d.y < innerHeight + 40);
+    ctx.fillStyle = BUTTER;
+    for (const d of f.drips) {
+      ctx.globalAlpha = Math.max(0, d.a) * (d.falling ? 1 : fade);
+      if (!d.falling) { // a teardrop hanging from the streak
+        ctx.beginPath();
+        ctx.moveTo(d.x - d.r * 0.55, d.y);
+        ctx.quadraticCurveTo(d.x - d.r * 0.35, d.y + d.len * 0.7, d.x - d.r, d.y + d.len);
+        ctx.arc(d.x, d.y + d.len, d.r, Math.PI, 0, true);
+        ctx.quadraticCurveTo(d.x + d.r * 0.35, d.y + d.len * 0.7, d.x + d.r * 0.55, d.y);
+        ctx.fill();
+      } else { // a falling drop, longer the faster it goes
+        ctx.beginPath();
+        ctx.ellipse(d.x, d.y + d.len, d.r * 0.9, d.r * (1 + Math.min(1.4, d.v * 2)), 0, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    // the streak: a darker rim, the butter, and a soft shine along the top
+    if (f.trail && fade > 0 && f.pts.length > 1) {
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      const path = () => {
+        ctx.beginPath();
+        ctx.moveTo(f.pts[0].x, f.pts[0].y);
+        for (let i = 1; i < f.pts.length - 1; i++) { // smooth through midpoints
+          const a = f.pts[i], b = f.pts[i + 1];
+          ctx.quadraticCurveTo(a.x, a.y, (a.x + b.x) / 2, (a.y + b.y) / 2);
+        }
+        const last = f.pts[f.pts.length - 1];
+        ctx.lineTo(last.x, last.y);
+      };
+      ctx.globalAlpha = fade * 0.9;
+      ctx.strokeStyle = BUTTER_DEEP; ctx.lineWidth = 15; path(); ctx.stroke();
+      ctx.globalAlpha = fade;
+      ctx.strokeStyle = BUTTER; ctx.lineWidth = 11; path(); ctx.stroke();
+      ctx.globalAlpha = fade * 0.5;
+      ctx.save(); ctx.translate(0, -2.5);
+      ctx.strokeStyle = '#fff8dc'; ctx.lineWidth = 2.5; path(); ctx.stroke();
+      ctx.restore();
+    }
+    // the pat of butter at the cursor: bigger and brighter once letting go will switch
+    if (f.trail && fade > 0) {
+      const h = f.pts[f.pts.length - 1];
+      const r = f.ready ? 12 + Math.sin(now / 90) * 1.2 : 10;
+      ctx.globalAlpha = fade;
+      ctx.fillStyle = BUTTER_DEEP; ctx.beginPath(); ctx.arc(h.x, h.y, r + 2, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = BUTTER; ctx.beginPath(); ctx.arc(h.x, h.y, r, 0, Math.PI * 2); ctx.fill();
+      ctx.globalAlpha = fade * 0.7;
+      ctx.fillStyle = '#fffbe6'; ctx.beginPath(); ctx.ellipse(h.x - r * 0.35, h.y - r * 0.4, r * 0.38, r * 0.22, -0.5, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    if (f.fadeAt && fade <= 0 && !f.drips.length) { fxClose(); return; }
+    f.raf = requestAnimationFrame(fxFrame);
   }
 
   on(window, 'pointerdown', (e) => {
@@ -456,31 +608,21 @@
     if (!press.dragging) {
       if (Math.abs(dx) < DRAG_START && Math.abs(dy) < DRAG_START) return;
       const axis = Math.abs(dy) >= Math.abs(dx) ? 'y' : 'x';
-      const dir = axis === 'y' ? -Math.sign(dy) : -Math.sign(dx);
-      let hit = findScroller(press.path, axis, dir);
-      // the page itself only keeps a sideways drag when it has real room to go that way: plenty of sites
-      // overflow sideways by a few px by accident, and a page already at its edge would only bounce
-      if (axis === 'x' && cfg.swipeTabs && hit && hit.el === root() && (!canMove(hit.el, 'x', dir) || maxOf(hit.el, 'x') < 40)) hit = null;
-      // sideways where nothing scrolls sideways: a swipe to the next / previous tab (when switched on)
-      const swipe = !hit && axis === 'x' && cfg.swipeTabs && !ownsSideways(press.path);
-      if (!hit && !swipe) { press = null; return; }
+      const hit = findScroller(press.path, axis, axis === 'y' ? -Math.sign(dy) : -Math.sign(dx));
+      if (!hit) { press = null; return; }
       press.dragging = true;
       press.axis = axis;
-      press.swipe = swipe;
-      if (!swipe) {
-        press.el = hit.el;
-        press.noBounce = hit.noBounce;
-        press.from = posOf(hit.el, axis) + (axis === 'y' ? dy : dx); // carry on from here, no jump
-      }
+      press.el = hit.el;
+      press.noBounce = hit.noBounce;
+      press.from = posOf(hit.el, axis) + (axis === 'y' ? dy : dx); // carry on from here, no jump
       press.path = null;
       ensureDragStyle();
       document.documentElement.classList.add('butter-dragging');
       const sel = window.getSelection && window.getSelection();
       if (sel) sel.removeAllRanges();
       try { document.documentElement.setPointerCapture(press.id); } catch (err) { /* already gone */ }
-      log(swipe ? 'swipe for a tab' : 'drag', axis);
+      log('drag', axis);
     }
-    if (press.swipe) { showSwipe(dx); return; }
     const el = press.el, axis = press.axis;
     const max = maxOf(el, axis);
     const want = press.from - (axis === 'y' ? dy : dx);
@@ -504,14 +646,6 @@
     endPress();
     if (!p.dragging) return;
     swallowClickUntil = Date.now() + 350; // the click that follows a drag is not a tap
-    if (p.swipe) {
-      hideSwipe();
-      const dx = e.clientX - p.x, v = velocity(p);
-      // far enough, or a quick flick the same way: flick left = next tab, flick right = previous (like Safari's tab bar)
-      const go = Math.abs(dx) >= SWIPE_DIST || (Math.abs(dx) >= 50 && Math.abs(v) > 0.6 && Math.sign(v) === Math.sign(dx));
-      if (go) switchTab(dx < 0 ? 1 : -1);
-      return;
-    }
     if (stretched.has(p.el)) { springBack(p.el); return; }
     const v = velocity(p);
     if (Math.abs(v) > 0.1) startFling(p.el, p.axis, -v);
@@ -534,11 +668,16 @@
     stopGlides();
     stopFling();
     endPress();
+    if (swipe && swipe.active) document.documentElement.classList.remove('butter-dragging');
+    swipe = null;
+    fxClose();
     for (const el of [...stretched.keys()]) restore(el);
     latch = null;
   }
   on(window, 'pagehide', stopEverything);
-  on(window, 'blur', endPress); // the button can come up in another window: no stuck drag
+  on(window, 'blur', () => { endPress(); if (swipe) endSwipe(null); }); // the button can come up in another window: no stuck drag
+  // the swipe just switched away from this tab: nothing left half-melted for when it comes back
+  on(document, 'visibilitychange', () => { if (document.hidden) fxClose(); });
 
   // last, so everything applySettings touches exists
   const store = typeof chrome !== 'undefined' && chrome.storage && chrome.storage.sync;
