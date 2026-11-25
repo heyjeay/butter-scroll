@@ -7,4 +7,5 @@ export const DEFAULTS = {
   dragScroll: false,
   trackpad: false,
   disabledSites: [],
+  debug: false,
 };

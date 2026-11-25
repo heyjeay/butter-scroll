@@ -6,8 +6,24 @@
 // Plain JS on purpose: it runs inside other people's pages, so no framework and nothing global but one flag.
 (function () {
   'use strict';
-  const debug = false;
-  const log = (...a) => { if (debug) console.log('[butter-scroll]', ...a); };
+  const debug = false; // developer switch; anyone can also turn on "Debug log" in the popup (cfg.debug)
+  let logOn = debug;
+  const log = (...a) => { if (logOn) console.log('%c[butter-scroll]', 'color:#d7a31a;font-weight:600', ...a); };
+  // one line per wheel decision, repeats of the same line folded together so spinning the wheel stays readable
+  let lastWheelLog = '', lastWheelLogAt = 0;
+  function logWheel(msg, ...extra) {
+    if (!logOn) return;
+    const now = performance.now();
+    if (msg === lastWheelLog && now - lastWheelLogAt < 800) { lastWheelLogAt = now; return; }
+    lastWheelLog = msg; lastWheelLogAt = now;
+    log('wheel:', msg, ...extra);
+  }
+  const describe = (el) => {
+    if (!el) return 'nothing';
+    if (el === document.scrollingElement || el === document.documentElement) return 'the page';
+    const cls = typeof el.className === 'string' && el.className.trim() ? '.' + el.className.trim().split(/\s+/).slice(0, 2).join('.') : '';
+    return `<${el.localName}${el.id ? '#' + el.id : ''}${cls}>`;
+  };
 
   // One engine per page. A newer copy (the extension was reloaded or updated, or the background worker
   // injected it into an already open tab) asks the old one to stand down instead of being turned away:
@@ -26,6 +42,7 @@
     dragScroll: false, // hold and drag the page like a phone
     trackpad: false,   // also smooth trackpads / free-spin wheels (they are usually smooth already)
     disabledSites: [],
+    debug: false,      // log every decision to the page's console (F12)
   };
   const SPRING = '.45s cubic-bezier(.25,1,.5,1)';
   const LATCH_MS = 300;        // a notch this soon after the last stays on a scroller that is still on its way
@@ -52,7 +69,9 @@
     active = !!cfg.enabled && !(cfg.disabledSites || []).includes(host);
     if (was && !active) stopEverything();
     if (!cfg.dragScroll) endPress();
-    log('settings', host, active, cfg);
+    logOn = debug || !!cfg.debug;
+    log(`running on ${host}${window.top === window ? '' : ' (in a frame)'}:`,
+      active ? 'on' : !cfg.enabled ? 'OFF everywhere (popup main switch)' : 'OFF for this site (popup site switch)', { ...cfg });
   }
   // pages that already run their own smooth scroll (Lenis, Locomotive, GSAP ScrollSmoother) keep it
   function pageScrollsItself() {
@@ -82,6 +101,7 @@
 
   // where a wheel event over `path` should go: { el, chain } or null (leave it to the browser)
   // the innermost scroller that can still move that way wins; one at its end passes it outward like the browser does
+  let whyNone = ''; // when findScroller gives up, why (for the debug log)
   function findScroller(path, axis, dir) {
     const overflow = axis === 'y' ? 'overflowY' : 'overflowX';
     const html = document.documentElement, body = document.body;
@@ -90,11 +110,14 @@
     const bodyIsViewport = getComputedStyle(html)[overflow] === 'visible';
     for (const node of path) {
       if (!(node instanceof Element) || node === html || (node === body && bodyIsViewport)) continue;
-      if (node.localName === 'select') return null;
+      if (node.localName === 'select') { whyNone = 'over a <select>'; return null; }
       const cs = getComputedStyle(node);
       if (!/(auto|scroll|overlay)/.test(cs[overflow])) continue;
       if (maxOf(node, axis) <= 1) continue;
-      if (cs.scrollSnapType && cs.scrollSnapType !== 'none') return null; // snapping fights a glide; the browser does it right
+      if (cs.scrollSnapType && cs.scrollSnapType !== 'none') { // snapping fights a glide; the browser does it right
+        whyNone = `${describe(node)} uses scroll-snap (${cs.scrollSnapType})`;
+        return null;
+      }
       if (canMove(node, axis, dir)) return { el: node };
       if (!stuck) stuck = node;
       const ob = axis === 'y' ? cs.overscrollBehaviorY : cs.overscrollBehaviorX;
@@ -104,12 +127,21 @@
       const r = root();
       if (canMove(r, axis, dir) || !stuck) {
         const hcs = getComputedStyle(html);
-        if (hcs.scrollSnapType !== 'none' || (bodyIsViewport && getComputedStyle(body).scrollSnapType !== 'none')) return null; // a snapping page
+        const snap = hcs.scrollSnapType !== 'none' ? hcs.scrollSnapType : bodyIsViewport ? getComputedStyle(body).scrollSnapType : 'none';
+        if (snap !== 'none') { whyNone = `the page uses scroll-snap (${snap})`; return null; }
         const ob = hcs[axis === 'y' ? 'overscrollBehaviorY' : 'overscrollBehaviorX'];
         return { el: r, noBounce: ob === 'none' };
       }
     }
-    return stuck ? { el: stuck } : null;
+    if (stuck) return { el: stuck };
+    if (logOn) {
+      const hcs = getComputedStyle(html), bcs = body ? getComputedStyle(body) : {};
+      const r = root();
+      whyNone = 'nothing under the mouse can scroll that way';
+      log('  page:', { html: hcs[overflow], body: bcs[overflow], scrollingElement: describe(r), scrollHeight: r.scrollHeight, clientHeight: r.clientHeight, bodyIsViewport },
+        '  under the mouse:', path.filter((n) => n instanceof Element).slice(0, 12).map((n) => `${describe(n)} ${getComputedStyle(n)[overflow]} ${n.scrollHeight}/${n.clientHeight}`));
+    } else whyNone = 'nothing under the mouse can scroll that way';
+    return null;
   }
   // can `el` still move toward dir (+1 = end)? a glide in flight counts from where it is heading
   function canMove(el, axis, dir) {
@@ -215,10 +247,15 @@
   let latch = null; // { ref: WeakRef(scroller), hit, axis, at }: weak, so a removed SPA view is not kept alive
   function onWheel(e) {
     if (!alive()) { teardown(); return; }
-    if (!active || e.defaultPrevented || e.ctrlKey || e.metaKey) return; // ctrl+wheel is zoom
+    if (!active) { logWheel(!cfg.enabled ? 'skipped: Butter Scroll is off' : `skipped: switched off for ${host}`); return; }
+    if (e.defaultPrevented) { logWheel('skipped: the page handled this wheel itself (preventDefault)', describe(e.target)); return; }
+    if (e.ctrlKey || e.metaKey) { logWheel('skipped: ctrl+wheel zooms'); return; }
     if (!e.isTrusted && !allowSynthetic) return;
-    if (!cfg.trackpad && looksLikeTrackpad(e)) return;
-    if (pageScrollsItself()) return;
+    if (!cfg.trackpad && looksLikeTrackpad(e)) {
+      logWheel(`skipped: looks like a trackpad or free-spin wheel (wheelDelta ${e.wheelDeltaY || e.wheelDeltaX}, not a multiple of 120). Turn on "Smooth trackpads too" to include it`);
+      return;
+    }
+    if (pageScrollsItself()) { logWheel('skipped: this site runs its own smooth scrolling (Lenis / Locomotive / ScrollSmoother)'); return; }
 
     let dx = e.deltaX, dy = e.deltaY;
     if (e.shiftKey && dy && !dx) { dx = dy; dy = 0; } // shift+wheel scrolls sideways
@@ -238,8 +275,9 @@
     if (latched && latched.isConnected && path.includes(latched) && canMove(latched, axis, dir)) {
       hit = { el: latched, noBounce: latch.noBounce };
     } else hit = findScroller(path, axis, dir);
-    if (!hit) { latch = null; return; }
+    if (!hit) { latch = null; logWheel(`left to Chrome: ${whyNone}`, describe(e.target)); return; }
     latch = { ref: new WeakRef(hit.el), noBounce: hit.noBounce, axis, at: now };
+    logWheel(`smoothing ${describe(hit.el)}${captureMode ? ' (capture mode)' : ''}`);
 
     const el = hit.el;
     const unit = e.deltaMode === 1 ? 40 : e.deltaMode === 2 ? dimOf(el, axis) * 0.875 : 1;
@@ -261,7 +299,32 @@
     if (stretched.has(el)) springBack(el);
     glideBy(el, axis, delta);
   }
-  on(window, 'wheel', onWheel, { passive: false }); // bubbling: a page that handles the wheel itself goes first
+  // The wheel is handled as it bubbles back up to window, so a page that handles the wheel itself (a map,
+  // an editor) gets to cancel it first. But some sites stopPropagation() the wheel on the way, and then the
+  // engine never hears it and Chrome scrolls natively. A capture listener notices events that went in
+  // and never came back out; after two in a row this page is handled on the way in instead.
+  let captureMode = false;
+  let inFlight = null, vanished = 0;
+  on(window, 'wheel', (e) => {
+    if (captureMode) { onWheel(e); return; }
+    if (inFlight) {
+      vanished++;
+      logWheel('the page stopped a wheel event before it got back to Butter Scroll (stopPropagation)', describe(inFlight.target));
+      if (vanished >= 2) {
+        captureMode = true;
+        inFlight = null;
+        log('switching this page to capture mode');
+        onWheel(e);
+        return;
+      }
+    }
+    inFlight = e;
+  }, { capture: true, passive: false });
+  on(window, 'wheel', (e) => {
+    if (captureMode) return;
+    if (inFlight === e) { inFlight = null; vanished = 0; }
+    onWheel(e);
+  }, { passive: false });
 
   // ---------------------------------------------------------------- drag to scroll + momentum (opt-in)
   let fling = null;

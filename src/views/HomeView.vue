@@ -58,8 +58,14 @@ const siteStatus = computed(() => {
       </RouterLink>
     </section>
 
-    <p class="px-5 pb-4 pt-3 text-[11px] leading-4 text-muted">
+    <p class="px-5 pb-1 pt-3 text-[11px] leading-4 text-muted">
       Sites with their own smooth scrolling, maps and scroll-snap carousels keep theirs.
     </p>
+
+    <section class="mx-3 mb-4 mt-2 rounded-xl border border-line bg-card">
+      <SettingRow title="Debug log" hint="Not smoothing somewhere? Turn this on, scroll there, then open the console (F12) to see why.">
+        <SwitchToggle v-model="settings.debug" label="Debug log" />
+      </SettingRow>
+    </section>
   </div>
 </template>
