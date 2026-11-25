@@ -1,0 +1,77 @@
+<!doctype html>
+<!-- Manual test bed for public/content.js: `npm run dev`, then open /playground/.
+     data-butter-test lets the engine accept synthetic wheel events from tests. -->
+<html lang="en" data-butter-test>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Butter Scroll playground</title>
+  <style>
+    :root { --bg: #faf7f0; --ink: #29241a; --muted: #7d7360; --line: #ece5d5; --card: #fff; color-scheme: light; }
+    @media (prefers-color-scheme: dark) { :root { --bg: #1a1813; --ink: #f2ede1; --muted: #a39a86; --line: #353025; --card: #24211a; color-scheme: dark; } }
+    html { scroll-behavior: smooth; } /* the engine must not let this animate every frame */
+    body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.6 "Segoe UI", system-ui, sans-serif; }
+    header { position: fixed; inset: 0 0 auto; height: 48px; display: flex; align-items: center; padding: 0 16px; background: var(--card); border-bottom: 1px solid var(--line); z-index: 2; }
+    main { max-width: 720px; margin: 0 auto; padding: 72px 16px 40px; }
+    section { margin: 28px 0; }
+    h2 { font-size: 15px; margin: 0 0 8px; }
+    .box { height: 220px; overflow-y: auto; border: 1px solid var(--line); border-radius: 12px; background: var(--card); }
+    .box p { margin: 0; padding: 8px 14px; border-bottom: 1px solid var(--line); color: var(--muted); }
+    .contain { overscroll-behavior: contain; }
+    .snap { display: flex; gap: 12px; overflow-x: auto; scroll-snap-type: x mandatory; }
+    .snap div { flex: 0 0 70%; height: 120px; scroll-snap-align: start; border-radius: 12px; background: var(--card); border: 1px solid var(--line); display: grid; place-items: center; }
+    .wide { overflow-x: auto; border: 1px solid var(--line); border-radius: 12px; background: var(--card); }
+    .wide div { width: 2400px; padding: 40px 14px; color: var(--muted); }
+    .filler p { color: var(--muted); }
+    .panel { display: flex; flex-wrap: wrap; gap: 8px 18px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--card); font-size: 13px; }
+    .panel label { display: inline-flex; align-items: center; gap: 6px; }
+  </style>
+</head>
+<body>
+  <header><strong>Butter Scroll playground</strong>&nbsp;· fixed header should never bounce</header>
+  <main>
+    <section id="panel" class="panel">
+      <label><input type="checkbox" name="enabled" checked> On</label>
+      <label><input type="checkbox" name="bounce" checked> Rubber band</label>
+      <label><input type="checkbox" name="dragScroll"> Drag to scroll</label>
+      <label><input type="checkbox" name="trackpad"> Trackpads too</label>
+      <label>Smoothness <input type="range" name="smoothness" min="40" max="300" step="5" value="110"></label>
+    </section>
+    <section><h2 id="inner">Inner scroller (bounces itself, then hands off to the page)</h2><div class="box" id="box"></div></section>
+    <section><h2>overscroll-behavior: contain (never hands off)</h2><div class="box contain" id="contain"></div></section>
+    <section><h2>Scroll-snap carousel (left to the browser)</h2><div class="snap" id="snap"><div>1</div><div>2</div><div>3</div><div>4</div></div></section>
+    <section><h2>Wide strip (shift + wheel scrolls sideways)</h2><div class="wide" id="wide"><div>← a long way sideways →</div></div></section>
+    <section class="filler" id="filler"></section>
+  </main>
+  <script>
+    for (const id of ['box', 'contain']) document.getElementById(id).innerHTML = Array.from({ length: 30 }, (_, i) => `<p>${id} line ${i + 1}</p>`).join('');
+    document.getElementById('filler').innerHTML = Array.from({ length: 60 }, (_, i) => `<p>Page paragraph ${i + 1}. Wheel down: each notch glides instead of jumping, and fast notches pile up into one long glide.</p>`).join('');
+  </script>
+  <script>
+    // stand-in for chrome.storage.sync so the toggles below drive the engine like the popup does
+    (function () {
+      const KEY = 'butter-playground';
+      const listeners = [];
+      const read = () => { try { return JSON.parse(localStorage.getItem(KEY) || '{}'); } catch (e) { return {}; } };
+      window.chrome = window.chrome || {};
+      chrome.storage = {
+        sync: {
+          get: async (defaults) => ({ ...defaults, ...read() }),
+          set: async (obj) => { localStorage.setItem(KEY, JSON.stringify({ ...read(), ...obj })); listeners.forEach((fn) => fn({}, 'sync')); },
+        },
+        onChanged: { addListener: (fn) => listeners.push(fn) },
+      };
+      const panel = document.getElementById('panel');
+      const s = read();
+      panel.querySelectorAll('input[type=checkbox]').forEach((box) => {
+        if (box.name in s) box.checked = s[box.name];
+        box.addEventListener('change', () => chrome.storage.sync.set({ [box.name]: box.checked }));
+      });
+      const ease = panel.querySelector('input[name=smoothness]');
+      if (s.smoothness) ease.value = s.smoothness;
+      ease.addEventListener('input', () => chrome.storage.sync.set({ smoothness: +ease.value }));
+    })();
+  </script>
+  <script src="/content.js"></script>
+</body>
+</html>

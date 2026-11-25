@@ -1,0 +1,82 @@
+@import "tailwindcss";
+
+:root {
+  --bg: #faf7f0;
+  --card: #ffffff;
+  --ink: #29241a;
+  --muted: #7d7360;
+  --line: #ece5d5;
+  --track: #e3dccb;
+  --butter: #f6cf57;
+  --butter-deep: #d7a31a;
+  --butter-ink: #3b2d05;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1a1813;
+    --card: #24211a;
+    --ink: #f2ede1;
+    --muted: #a39a86;
+    --line: #353025;
+    --track: #423c2e;
+    --butter-deep: #e8b62c;
+    color-scheme: dark;
+  }
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-card: var(--card);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-line: var(--line);
+  --color-track: var(--track);
+  --color-butter: var(--butter);
+  --color-butter-deep: var(--butter-deep);
+  --color-butter-ink: var(--butter-ink);
+  --font-sans: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, sans-serif;
+}
+
+html, body {
+  margin: 0;
+  width: 340px;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* range slider: butter fill up to the thumb */
+.range {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  border-radius: 999px;
+  background: linear-gradient(to right, var(--butter-deep) var(--fill), var(--track) var(--fill));
+  cursor: pointer;
+}
+.range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #fff;
+  border: 1px solid var(--line);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.18);
+  transition: transform 0.15s;
+}
+.range:active::-webkit-slider-thumb { transform: scale(1.12); }
+.range:focus-visible { outline: 2px solid var(--butter-deep); outline-offset: 4px; }
+
+/* page transitions: push slides in from the right, pop slides back */
+.push-enter-active, .push-leave-active, .pop-enter-active, .pop-leave-active {
+  transition: transform 0.38s cubic-bezier(.25, 1, .5, 1), opacity 0.38s cubic-bezier(.25, 1, .5, 1);
+}
+.push-enter-from { transform: translateX(100%); }
+.push-leave-to { transform: translateX(-28%); opacity: 0; }
+.pop-enter-from { transform: translateX(-28%); opacity: 0; }
+.pop-leave-to { transform: translateX(100%); }
+@media (prefers-reduced-motion: reduce) {
+  .push-enter-active, .push-leave-active, .pop-enter-active, .pop-leave-active { transition: none; }
+}
